@@ -1,0 +1,182 @@
+name: Armada personal image
+
+# Private, runner-local build of the personalized Armada image.
+#
+# Everything runs on this self-hosted Docker runner only: nothing is pushed to
+# a public registry or a Release and no device is deployed here. The heavy
+# build CPU lives solely on the build server's Docker daemon (its socket is
+# bind-mounted into the runner); the NAS is used only as an authoritative store
+# for the source, logs, metadata and the finished image.
+#
+# The official workflows were moved to .github/upstream-workflows and no longer
+# run automatically; this file does not touch them.
+#
+# All ARMADA_* values (execution base and NAS endpoint/key/known-hosts) are
+# already present in the runner environment; no GitHub secret is added.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Exactly one full personal build at a time: a newly queued run waits for the
+# in-flight build to finish instead of cancelling it, so a complete image is
+# never aborted half-way.
+concurrency:
+  group: armada-personal-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build personal Armada image
+    runs-on: [self-hosted, Linux, X64, armada-personal, docker]
+    timeout-minutes: 1440
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # No credentials are left in the checkout, so the source archive on
+          # the NAS never carries a token or user config.
+          persist-credentials: false
+
+      - name: Prepare task space
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The Docker daemon of the build server must be reachable from this
+          # runner before any heavy work starts.
+          docker info >/dev/null
+
+          : "${GITHUB_RUN_ID:?}" "${GITHUB_RUN_ATTEMPT:?}" "${GITHUB_RUN_NUMBER:?}" "${GITHUB_SHA:?}" "${GITHUB_WORKSPACE:?}"
+          : "${ARMADA_EXECUTION_BASE:?ARMADA_EXECUTION_BASE must be set by the runner}"
+
+          [[ "${ARMADA_EXECUTION_BASE}" == /* ]] \
+            || { echo "ERROR: ARMADA_EXECUTION_BASE must be absolute: ${ARMADA_EXECUTION_BASE}" >&2; exit 2; }
+
+          BUILD_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ARMADA_VERSION="$(date -u +%Y%m%d).personal.${GITHUB_RUN_NUMBER}.${GITHUB_SHA:0:8}"
+          TASK_ROOT="${ARMADA_EXECUTION_BASE}/runs/${BUILD_ID}"
+          SRC_ROOT="${GITHUB_WORKSPACE}"
+
+          # This run only ever touches its own task directory, and the runner
+          # bind-mounts these very same absolute paths, so the build server's
+          # Docker daemon can mount them unchanged.
+          case "${TASK_ROOT}/" in
+            "${ARMADA_EXECUTION_BASE}/runs/"*) ;;
+            *) echo "ERROR: TASK_ROOT escapes ARMADA_EXECUTION_BASE: ${TASK_ROOT}" >&2; exit 2 ;;
+          esac
+          [[ "${SRC_ROOT}" == /* ]] || { echo "ERROR: SRC_ROOT must be absolute: ${SRC_ROOT}" >&2; exit 2; }
+
+          mkdir -p "${TASK_ROOT}/work" "${TASK_ROOT}/logs" "${TASK_ROOT}/output"
+
+          # Cache is shared across runs and lives only under
+          # ARMADA_EXECUTION_BASE; the task reaches it through a symlink so no
+          # build output ever lands outside this task's own space.
+          CACHE_TARGET="${ARMADA_EXECUTION_BASE}/cache"
+          mkdir -p "${CACHE_TARGET}"
+
+          # Never delete pre-existing data: if a real directory (not a symlink)
+          # already sits at ${TASK_ROOT}/cache, stop instead of rm -rf'ing it.
+          if [[ -e "${TASK_ROOT}/cache" && ! -L "${TASK_ROOT}/cache" ]]; then
+            echo "ERROR: ${TASK_ROOT}/cache exists and is not a symlink; refusing to replace data" >&2
+            exit 2
+          fi
+
+          # Keep a symlink that already points at the shared cache; otherwise
+          # (re)create it.
+          if [[ -L "${TASK_ROOT}/cache" && "$(readlink "${TASK_ROOT}/cache")" == "${CACHE_TARGET}" ]]; then
+            echo "==> Reusing existing cache symlink -> ${CACHE_TARGET}"
+          else
+            ln -sfn "${CACHE_TARGET}" "${TASK_ROOT}/cache"
+          fi
+
+          {
+            echo "GITHUB_SHA=${GITHUB_SHA}"
+            echo "ARMADA_VERSION=${ARMADA_VERSION}"
+            echo "BUILD_ID=${BUILD_ID}"
+          } > "${TASK_ROOT}/work/build-source.txt"
+
+          {
+            echo "BUILD_ID=${BUILD_ID}"
+            echo "ARMADA_VERSION=${ARMADA_VERSION}"
+            echo "TASK_ROOT=${TASK_ROOT}"
+            echo "SRC_ROOT=${SRC_ROOT}"
+          } >> "${GITHUB_ENV}"
+
+          echo "BUILD_ID=${BUILD_ID}"
+          echo "ARMADA_VERSION=${ARMADA_VERSION}"
+          echo "TASK_ROOT=${TASK_ROOT}"
+
+      - name: Back up source to NAS
+        shell: bash
+        # Probes the NAS run directory for writability and archives the exact
+        # inputs. A failure here stops the workflow before the build starts.
+        run: bash personal-build/sync-nas.sh source
+
+      - name: Build rootfs image
+        shell: bash
+        env:
+          # Handed to the rootfs build as a Docker secret; never printed.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash personal-build/build-rootfs.sh "${TASK_ROOT}" "${SRC_ROOT}"
+
+      - name: Build disk image
+        shell: bash
+        run: bash personal-build/build-disk.sh "${TASK_ROOT}" "${SRC_ROOT}"
+
+      - name: Publish results to NAS
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          bash personal-build/sync-nas.sh results
+          sync_rc=$?
+          set -e
+
+          task_root="${TASK_ROOT:-}"
+          nas_target="${ARMADA_NAS_TARGET:-unknown}"
+
+          present="no"
+          names=""
+          if [[ -n "${task_root}" && -d "${task_root}/output" ]]; then
+            shopt -s nullglob
+            imgs=( "${task_root}/output"/armada-*.img.gz )
+            shopt -u nullglob
+            if (( ${#imgs[@]} > 0 )); then
+              present="yes"
+              names="$(printf '%s ' "${imgs[@]##*/}")"
+            fi
+          fi
+
+          if [[ "${present}" == "yes" ]]; then
+            if [[ -f "${task_root}/logs/nas-verified.sha256" ]]; then
+              verify="passed (NAS read-back hash confirmed)"
+            else
+              verify="FAILED - NAS read-back hash not confirmed"
+            fi
+          else
+            verify="skipped (no product)"
+          fi
+
+          {
+            echo "## Armada personal image"
+            echo
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| version | \`${ARMADA_VERSION:-unknown}\` |"
+            echo "| build id | \`${BUILD_ID:-unknown}\` |"
+            echo "| NAS run dir | \`${nas_target}/runs/${BUILD_ID:-unknown}\` |"
+            echo "| product present | ${present}${names:+ (${names})} |"
+            echo "| NAS read-back verification | ${verify} |"
+            echo "| results sync exit | ${sync_rc} |"
+            echo
+            echo "> Not yet validated on real hardware."
+            echo "> A manual official Beta update may overwrite the customized system layer."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          exit "${sync_rc}"

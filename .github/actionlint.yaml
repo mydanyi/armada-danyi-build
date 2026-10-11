@@ -1,0 +1,11 @@
+# actionlint configuration for the Armada personal build.
+#
+# Declares the custom self-hosted runner labels used by this repository so that
+# actionlint does not report them as unknown runners. Only these additional
+# labels are declared; every other actionlint check stays enabled and no other
+# diagnostic is suppressed.
+self-hosted-runner:
+  labels:
+    - armada-personal
+    - docker
+    - v100server

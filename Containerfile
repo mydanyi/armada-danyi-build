@@ -6,84 +6,85 @@ ARG BASE_IMAGE=quay.io/fedora/fedora-bootc:44
 # from that package's sources, and passes the refs in as build args.
 
 ARG STEAM_BOOTSTRAP_REF
+ARG FEX_REF
+ARG MESA_REF
+ARG MANGOHUD_REF
+ARG GAMESCOPE_REF
+ARG GAMESCOPE_SESSION_REF
+ARG GAMESCOPE_SESSION_STEAM_REF
+ARG KWIN_REF
+ARG PLASMA_MOBILE_REF
+ARG POWERDEVIL_REF
+ARG PROTONTRICKS_REF
+ARG KERNEL_REF
+ARG INPUTPLUMBER_REF
+ARG STEAMOS_MANAGER_REF
+ARG NETWORKMANAGER_REF
+ARG WPA_SUPPLICANT_REF
+ARG SCX_SCHEDS_REF
+ARG JUPITER_HW_SUPPORT_REF
+ARG MESA_ANDROID_REF
+ARG LEPTON_REF
+ARG MESA_X86_REF
+ARG EXTEST_REF
+ARG ARMADA_AURORA_REF
+ARG ARMADA_SPLASH_REF
+ARG ARMADA_RGB_REF
+ARG UMTP_RESPONDER_REF
+
 FROM ${STEAM_BOOTSTRAP_REF} AS steam-bootstrap
 
-ARG FEX_REF
 FROM ${FEX_REF} AS fex
 
-ARG MESA_REF
 FROM ${MESA_REF} AS mesa
 
-ARG MANGOHUD_REF
 FROM ${MANGOHUD_REF} AS mangohud
 
-ARG GAMESCOPE_REF
 FROM ${GAMESCOPE_REF} AS gamescope
 
-ARG GAMESCOPE_SESSION_REF
 FROM ${GAMESCOPE_SESSION_REF} AS gamescope-session
 
-ARG GAMESCOPE_SESSION_STEAM_REF
 FROM ${GAMESCOPE_SESSION_STEAM_REF} AS gamescope-session-steam
 
-ARG KWIN_REF
 FROM ${KWIN_REF} AS kwin
 
-ARG PLASMA_MOBILE_REF
 FROM ${PLASMA_MOBILE_REF} AS plasma-mobile
 
-ARG POWERDEVIL_REF
 FROM ${POWERDEVIL_REF} AS powerdevil
 
-ARG PROTONTRICKS_REF
 FROM ${PROTONTRICKS_REF} AS protontricks
 
-ARG KERNEL_REF
 FROM ${KERNEL_REF} AS kernel
 
-ARG INPUTPLUMBER_REF
 FROM ${INPUTPLUMBER_REF} AS inputplumber
 
-ARG STEAMOS_MANAGER_REF
 FROM ${STEAMOS_MANAGER_REF} AS steamos-manager
 
-ARG NETWORKMANAGER_REF
 FROM ${NETWORKMANAGER_REF} AS networkmanager
 
-ARG WPA_SUPPLICANT_REF
 FROM ${WPA_SUPPLICANT_REF} AS wpa_supplicant
 
-ARG SCX_SCHEDS_REF
 FROM ${SCX_SCHEDS_REF} AS scx-scheds
 
-ARG JUPITER_HW_SUPPORT_REF
 FROM ${JUPITER_HW_SUPPORT_REF} AS jupiter-hw-support
 
-ARG MESA_ANDROID_REF
 FROM ${MESA_ANDROID_REF} AS mesa-android
 
-ARG LEPTON_REF
 FROM ${LEPTON_REF} AS lepton
 
-ARG MESA_X86_REF
 FROM ${MESA_X86_REF} AS mesa-x86
 
-ARG EXTEST_REF
 FROM ${EXTEST_REF} AS extest
 
-ARG ARMADA_AURORA_REF
 FROM ${ARMADA_AURORA_REF} AS armada-aurora
 
-ARG ARMADA_SPLASH_REF
 FROM ${ARMADA_SPLASH_REF} AS armada-splash
 
-ARG ARMADA_RGB_REF
 FROM ${ARMADA_RGB_REF} AS armada-rgb
 
-ARG UMTP_RESPONDER_REF
 FROM ${UMTP_RESPONDER_REF} AS umtp-responder
 
-FROM docker.io/library/node:22-slim AS decky-build
+FROM --platform=$BUILDPLATFORM docker.io/library/node:22-slim AS decky-build
 WORKDIR /build/armada-control
 COPY decky/armada-control/package.json decky/armada-control/package-lock.json ./
 RUN npm ci
@@ -93,12 +94,13 @@ WORKDIR /build/armada-store
 COPY decky/armada-store/package.json decky/armada-store/package-lock.json ./
 RUN npm ci
 COPY decky/armada-store/ ./
-RUN npm run build
+RUN npm test && npm run build
 
 FROM scratch AS ctx
 COPY abl /abl/
 COPY build_files /build_files/
 COPY decky /decky/
+COPY personal-build /personal-build/
 COPY system_files /system_files/
 
 FROM ${BASE_IMAGE} AS armada-rootfs
