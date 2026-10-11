@@ -18,3 +18,13 @@ RUN dnf install -y \
         file \
     && dnf clean all \
     && rm -rf /var/cache/dnf/*
+
+# Give osbuild a dedicated bwrap binary path inside this builder image so that
+# a host-side AppArmor policy keyed on /usr/bin/bwrap (e.g. Ubuntu's
+# /etc/apparmor.d/bwrap-userns-restrict attaching unpriv_bwrap) no longer
+# strips the mount/chown capabilities osbuild needs in its bwrap sandbox.
+# This only renames the in-image binary and leaves a relative symlink at the
+# original path; host AppArmor, profiles, and sysctl are untouched.
+# (/usr/sbin is a symlink to /usr/bin on this base, so we only act in /usr/bin.)
+RUN mv /usr/bin/bwrap /usr/bin/bwrap-osbuild \
+    && ln -s bwrap-osbuild /usr/bin/bwrap

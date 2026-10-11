@@ -2,13 +2,16 @@
 # Armada personal disk build — Docker runner orchestration.
 #
 # Turns the rootfs unit's image into a flashable disk image on the long-lived
-# Docker runner (192.168.88.9): the pinned bootc-image-builder container builds
-# output/image/disk.raw, the official post_process scripts stage the ROCKNIX
-# ABL /KERNEL and finalize the image (MBR + ABL + gzip), and an inline offline
-# check verifies the freshly-built image between those two steps before it is
-# compressed.
+# Docker runner (192.168.88.9): the pinned BIB produces output/image/disk.raw,
+# the official post_process scripts stage the ROCKNIX ABL /KERNEL and finalize
+# the image (MBR + ABL + gzip), and an inline offline check verifies the
+# freshly-built image between those two steps before it is compressed.
 #
-# Everything runs inside the pinned BIB container with an exclusive vfs
+# BIB runs with --build-container pointing at a local ARM64 build environment
+# that replaces btrfs/bwrap with native tools while the ARM64 installer remains
+# under qemu-user. The target payload is unchanged.
+#
+# Everything runs inside the pinned BIB container with an exclusive overlay
 # containers-storage cache under this task's runtime space: the host's global
 # podman storage is never mounted or touched, nothing is pruned, and no host
 # configuration changes. There is no fallback to building locally and nothing
@@ -52,6 +55,7 @@ SRC_ROOT="${2:-${SRC_ROOT:-${DEFAULT_SRC_ROOT}}}"
 # plus the filesystem/tooling the offline check requires (dosfstools,
 # btrfs-progs, jq, file). It is never pulled: it only ever exists locally.
 BIB_IMAGE="local/armada-personal-disk-builder:checked"
+BIB_BUILD_REF="localhost/armada-personal-bootc-tools:${BUILD_ID}"
 
 # Local Docker socket of the build server (mounted into the runner container);
 # the runner may already export DOCKER_HOST.
@@ -61,7 +65,7 @@ export DOCKER_HOST
 LOG_DIR="${TASK_ROOT}/logs"
 WORK_DIR="${TASK_ROOT}/work"
 OUTPUT_DIR="${TASK_ROOT}/output"
-BIB_STORAGE="${TASK_ROOT}/cache/bib-storage"
+BIB_STORAGE="${TASK_ROOT}/cache/bib-overlay-storage"
 LOG_FILE="${LOG_DIR}/disk.log"
 
 ROOTFS_TAR="${WORK_DIR}/rootfs.tar"
@@ -111,30 +115,41 @@ set -euo pipefail
 
 : "${IMAGE_NAME:?IMAGE_NAME is required}"
 : "${ARMADA_VERSION:?ARMADA_VERSION is required}"
+: "${BIB_BUILD_REF:?BIB_BUILD_REF is required}"
 
 RAW=/output/image/disk.raw
 
-# Isolate containers/storage inside this container and force the vfs driver on
-# this task's exclusive graphroot (the mounted /var/lib/containers/storage).
-# BIB and every podman invocation below inherit this through the environment,
-# so nothing here ever reads the host's global podman storage.
+# Isolate containers/storage inside this container on this task's exclusive
+# overlay store (the mounted /var/lib/containers/storage). BIB requires the
+# overlay driver -- vfs is incompatible -- and this store is independent of the
+# earlier vfs cache. BIB and every podman invocation below inherit this through
+# the environment, so nothing here ever reads the host's global podman storage.
 export CONTAINERS_STORAGE_CONF=/work/containers-storage.conf
 cat >"${CONTAINERS_STORAGE_CONF}" <<'STORAGE_CONF'
 [storage]
-driver = "vfs"
+driver = "overlay"
 runroot = "/run/containers/storage"
 graphroot = "/var/lib/containers/storage"
 STORAGE_CONF
 
 # Load the rootfs unit's image (a `docker save` tarball) into that storage.
-podman --storage-driver=vfs load -i /work/rootfs.tar
+podman --storage-driver=overlay load -i /work/rootfs.tar
 
-# Build the raw disk. /config.toml is bind-mounted from the checkout and read
-# automatically; the log streams to stdout (the runner tees it to logs/disk.log).
+# Load the ARM64 build environment containing native filesystem/sandbox tools.
+podman --storage-driver=overlay load -i /work/disk-builder.tar
+
+# BIB's osbuild store must exist before the build; without it BIB fails with
+# "chcon: cannot access '/work/osbuild-store': No such file or directory".
+mkdir -p /work/osbuild-store
+
+# Build the raw ARM64 disk. /config.toml is read automatically. --build-container
+# runs the build in the loaded ARM64 environment (native btrfs/bwrap) instead of
+# emulating the btrfs ioctls; the target payload is unchanged.
 /usr/bin/bootc-image-builder build "${IMAGE_NAME}" \
     --type raw \
     --target-arch arm64 \
     --rootfs btrfs \
+    --build-container "${BIB_BUILD_REF}" \
     --output /output \
     --store /work/osbuild-store \
     --use-librepo=true
@@ -175,7 +190,10 @@ sfdisk -J "${LOOP}" > /output/partition-layout.json
 
 mount "${LOOP}p1" "${MNT}/p1"
 mount "${LOOP}p2" "${MNT}/p2"
-mount "${LOOP}p3" "${MNT}/p3"   # btrfs default root subvolume
+# The Btrfs default subvolume (ID 5) is the top level and holds only the
+# 'root' subvolume; the deployment lives under /root, so mount that subvolume
+# explicitly (matching the kernel's rootflags=subvol=/root).
+mount -o subvol=/root "${LOOP}p3" "${MNT}/p3"
 ROOT="${MNT}/p3"
 
 shopt -s nullglob
@@ -193,6 +211,7 @@ if [ "${#deploy_dirs[@]}" -ne 1 ]; then
     exit 1
 fi
 DEPLOY="${deploy_dirs[0]}"
+[ ! -e "${DEPLOY}/usr/libexec/armada-native-tools" ] || { echo "ERROR: build-only native tools leaked into the target deployment" >&2; exit 1; }
 ORIGIN="${DEPLOY}.origin"
 
 # Decky plugins: the two official ones plus the three NAS-sourced ones.
@@ -240,7 +259,7 @@ done
     || { echo "ERROR: plugins.lock.json missing from the image" >&2; exit 1; }
 
 # Verify the ostree repository object store.
-ostree --repo "${ROOT}/ostree/repo" fsck
+ostree fsck --repo="${ROOT}/ostree/repo"
 
 # The BIB image records the local build reference (a localhost image that no
 # flashed device can pull), which would break bootc updates. Repoint the single
@@ -319,6 +338,17 @@ docker build \
     -t "${BIB_IMAGE}" \
     "${SCRIPT_DIR}"
 
+echo "==> Building ARM64 build environment ${BIB_BUILD_REF}"
+docker build \
+    --platform linux/arm64 \
+    --build-arg "ROOTFS_REF=${IMAGE_NAME}" \
+    -f "${SCRIPT_DIR}/bootc-build-tools.Containerfile" \
+    -t "${BIB_BUILD_REF}" \
+    "${SCRIPT_DIR}"
+
+echo "==> Exporting ${BIB_BUILD_REF} to disk-builder.tar"
+docker save -o "${WORK_DIR}/disk-builder.tar" "${BIB_BUILD_REF}"
+
 echo "==> Creating container ${CONTAINER_NAME}"
 docker create \
     --name "${CONTAINER_NAME}" \
@@ -331,6 +361,7 @@ docker create \
     --entrypoint /bin/bash \
     -e "IMAGE_NAME=${IMAGE_NAME}" \
     -e "ARMADA_VERSION=${ARMADA_VERSION}" \
+    -e "BIB_BUILD_REF=${BIB_BUILD_REF}" \
     -v "${SRC_ROOT}:/source:ro" \
     -v "${WORK_DIR}:/work" \
     -v "${OUTPUT_DIR}:/output" \

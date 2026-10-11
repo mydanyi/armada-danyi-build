@@ -1,0 +1,4 @@
+#!/bin/sh
+exec /usr/libexec/armada-native-tools/lib/ld-linux-x86-64.so.2 \
+  --library-path /usr/libexec/armada-native-tools/lib \
+  /usr/libexec/armada-native-tools/bin/"${0##*/}" "$@"
