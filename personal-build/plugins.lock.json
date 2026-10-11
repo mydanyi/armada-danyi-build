@@ -11,6 +11,7 @@
     "version": "0.14.4-armada-lsfg2.20261011.15-preview.1",
     "url": "https://github.com/mydanyi/decky-lsfg-vk-arm64/releases/download/v0.14.4-armada-lsfg2.20261011.15-preview.1/LSFG-VK-ARM64-0.14.4-armada-lsfg2.20261011.15-preview.1-full.zip",
     "sha256": "c349b113e15143ffa657deb4f00526d06266680ac45702a787e457f8ba6ec5dc",
+    "archive": "personal-build/plugin-assets/LSFG-VK-ARM64-0.14.4-armada-lsfg2.20261011.15-preview.1-full.zip",
     "directory": "LSFG-VK ARM64"
   },
   {

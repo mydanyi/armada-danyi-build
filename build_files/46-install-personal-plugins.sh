@@ -6,7 +6,9 @@ set -euxo pipefail
 # existing armada-decky-sync copies /usr/share/decky-plugins/* into the user's
 # homebrew tree.
 #
-# Every archive is a public GitHub release asset pinned by SHA-256 in
+# Public archive attachments are downloaded from the public GitHub releases;
+# private archive attachments ship inside the private source tree as bundled
+# assets. Either way every archive is pinned by SHA-256 in
 # personal-build/plugins.lock.json. Each package already carries a top-level
 # directory named after the plugin, so its zip extracts straight into
 # /usr/share/decky-plugins without an extra nesting level.
@@ -115,7 +117,11 @@ for plugin in plugins:
     archive_path = os.path.join(WORK, f"{directory}.zip")
 
     print(f"installing {name} {plugin['version']}")
-    fetch(plugin["url"], archive_path)
+    if plugin.get("archive"):
+        shutil.copyfile(os.path.join("/ctx", plugin["archive"]), archive_path)
+        print(f"using bundled package: {plugin['archive']}")
+    else:
+        fetch(plugin["url"], archive_path)
 
     actual = sha256(archive_path)
     expected = plugin["sha256"].lower()
