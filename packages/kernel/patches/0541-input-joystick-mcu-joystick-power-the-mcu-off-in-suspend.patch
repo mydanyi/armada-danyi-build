@@ -1,0 +1,97 @@
+From: Armada <noreply@armada.local>
+Subject: [PATCH] input: joystick: mcu-joystick: power the MCU off in suspend
+
+The AYANEO SPI MCU behind the built-in gamepad stays powered for the whole
+system sleep: nothing deasserts power(125)/en(92), and the 1.2 V logic rail
+is on-in-suspend because it is shared with the codec's vdd-px. The MCU keeps
+running its ~250 Hz frame loop (and whatever else its board carries) for the
+entire sleep window, and on the KONKR Pocket FIT Elite that is current that
+buys nothing — the pad cannot wake the system, its IRQ is masked at suspend
+and it is not a wakeup source.
+
+Drop the load switch and the enable pin at system suspend, and put the MCU
+through the vendor power-on sequence on resume. This is the same sequence
+mcu_power_dance() already runs to recover a wedged MCU, so it is the power
+cycle the vendor driver uses itself.
+
+Two things are deliberately not touched:
+- vdd (vreg_l2i_1p2): shared with the WCD939x vdd-px rail, cannot be cut here.
+- The UART MCU (konkr_sysbtn): its board has no modelled supply, so there is
+  nothing to cut from this driver. It already blanks the stick LEDs before
+  suspend and resends its enable frame afterwards, so it survives the SPI MCU
+  losing power if the two interfaces share one board.
+
+mcu_joystick.power_off_in_suspend=0 restores the old behaviour, for A/B
+measurement on hardware.
+--- a/drivers/input/joystick/mcu_joystick.c
++++ b/drivers/input/joystick/mcu_joystick.c
+@@ -606,7 +606,22 @@
+  * SPI controller ("Attempted to sync while suspend"), thrashing init commands
+  * and full power cycles against a dead bus for the whole suspend window, and
+  * the gamepad only comes back if the watchdog happens to win afterwards.
++ *
++ * On top of that the MCU board keeps drawing current for the whole sleep, so
++ * suspend also drops its power. The 1.2 V logic rail (vdd) cannot be used for
++ * that: it is shared with the codec's vdd-px and is on-in-suspend in LPM. The
++ * load switch (power) and the enable pin (en) are what actually remove power,
++ * and deasserting them in that order is the sequence mcu_power_dance() already
++ * uses to recover a wedged MCU, i.e. the vendor's own power cycle.
++ *
++ * mcu_joystick.power_off_in_suspend=0, or writing 0 to the matching sysfs
++ * parameter, restores the old behaviour for A/B measurement.
+  */
++static bool power_off_in_suspend = true;
++module_param(power_off_in_suspend, bool, 0644);
++MODULE_PARM_DESC(power_off_in_suspend,
++		 "Cut the MCU's power for system sleep (default: on)");
++
+ static int mcu_joystick_suspend(struct device *dev)
+ {
+ 	struct mcu_joystick *mcu = spi_get_drvdata(to_spi_device(dev));
+@@ -620,6 +635,13 @@
+ 	mcu_write_word(mcu, MCU_WRITE_WORD(MCU_REG_RUMBLE_STRONG, 0));
+ 	mcu_write_word(mcu, MCU_WRITE_WORD(MCU_REG_RUMBLE_WEAK, 0));
+ 	mcu_report_idle(mcu);
++
++	if (power_off_in_suspend) {
++		/* en first, then the load switch — the vendor's own order */
++		gpiod_set_value_cansleep(mcu->en_gpio, 0);
++		gpiod_set_value_cansleep(mcu->power_gpio, 0);
++		dev_info(dev, "MCU power cut for suspend\n");
++	}
+ 
+ 	return 0;
+ }
+@@ -627,19 +649,25 @@
+ static int mcu_joystick_resume(struct device *dev)
+ {
+ 	struct mcu_joystick *mcu = spi_get_drvdata(to_spi_device(dev));
+-	u16 regs[MCU_NREGS];
+ 
+ 	/*
+-	 * Vendor resume recipe: re-send the irq-rate + start commands. If the
+-	 * MCU lost power across the suspend it answers zeros — give it the
+-	 * full power-on sequence then.
++	 * suspend() cut the MCU's power, so it cannot answer the cheap
++	 * init-command probe: run the vendor power-on sequence first. With the
++	 * power cut disabled, keep the old probe-then-cycle recipe.
+ 	 */
+-	mcu_send_init_cmds(mcu);
+-	if (mcu_read_frame(mcu, regs) || !mcu_frame_hdr_ok(regs)) {
+-		dev_info(dev, "resume: MCU silent after init cmds, power cycling\n");
++	if (power_off_in_suspend) {
++		dev_info(dev, "resume: power cycling the MCU\n");
+ 		mcu_power_dance(mcu);
++	} else {
++		u16 regs[MCU_NREGS];
++
+ 		mcu_send_init_cmds(mcu);
++		if (mcu_read_frame(mcu, regs) || !mcu_frame_hdr_ok(regs)) {
++			dev_info(dev, "resume: MCU silent after init cmds, power cycling\n");
++			mcu_power_dance(mcu);
++		}
+ 	}
++	mcu_send_init_cmds(mcu);
+ 
+ 	mcu->bad_frames = 0;
+ 	mcu->reinit_fails = 0;

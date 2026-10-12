@@ -236,3 +236,6 @@ v2_20260420_neil_armstrong_arm64_qcom_sm8650_misc_enhancements.patch
 1021-wifi-ath12k-fix-single-pdev-frequency-ranges.patch
 1022-wifi-ath12k-split-WCN7860-scans-by-firmware-ranges.patch
 1023-wifi-ath12k-protect-TX-during-associated-range-scans.patch
+
+# ============== KONKR Pocket FIT Elite ==============
+0541-input-joystick-mcu-joystick-power-the-mcu-off-in-suspend.patch

@@ -209,6 +209,10 @@ no equivalent submission was found, or a permanent URL to the upstream submissio
   source: https://github.com/ROCKNIX/distribution/blob/024028b4f3fdd139ae1e575efb25914b8f76595d/projects/ROCKNIX/devices/SM8750/patches/linux/0069-input-misc-add-konkr-sysbtn-MCU-system-buttons.patch
   upstream: unknown
   notes: Updated to ROCKNIX #3089, which adds the MCU-rendered stick lighting effects (sysfs "effect": static/breath/rainbow) and fixes the PM notifier to replay the active lighting mode after resume instead of only the last static colour.
+- `patches/0541-input-joystick-mcu-joystick-power-the-mcu-off-in-suspend.patch`
+  source: armada
+  upstream: local
+  notes: Drops the AYANEO SPI gamepad MCU's load switch and enable pin for system sleep and power-cycles it on resume, so the MCU board does not stay powered through s2idle. Muxed by `mcu_joystick.power_off_in_suspend` for on-device A/B measurement.
 - `patches/0060_Mangmi-Pocket-Max-SPI-joypad.patch`
   source: https://github.com/ROCKNIX/distribution/blob/807c74fc46c124891d8aa9b57a68533d38e9a6b2/projects/ROCKNIX/devices/SM8250/patches/linux/0060_Mangmi-Pocket-Max-SPI-joypad.patch
   upstream: unknown
