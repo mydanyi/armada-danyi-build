@@ -11,8 +11,9 @@ name: Sync Armada upstream
 # prints the key and adds no GitHub secret.
 on:
   schedule:
-    # 20:17 UTC == 04:17 Asia/Hong_Kong (next day), i.e. once per day.
-    - cron: '17 20 * * *'
+    # TEMPORARY: 5-minute validation for GitHub not emitting the schedule event.
+    # Restore daily 04:17 Asia/Hong_Kong (20:17 UTC '17 20 * * *') after Codex verifies.
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
