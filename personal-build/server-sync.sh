@@ -27,7 +27,7 @@ set -euo pipefail
 # This task's own execution cache and the repo it syncs (the same private
 # repository the manual workflow pushes to). Nothing else is ever addressed.
 CHECKOUT="${ARMADA_EXECUTION_BASE}/automation/checkout"
-REPO_URL="git@ssh.github.com:mydanyi/armada-personal-build.git"
+REPO_URL="git@ssh.github.com:mydanyi/armada-danyi-build.git"
 
 # The dedicated, repo-scoped write deploy key provisioned on the runner.
 KEY="${ARMADA_EXECUTION_BASE}/credentials/upstream-sync-ed25519"

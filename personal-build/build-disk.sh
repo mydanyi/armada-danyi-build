@@ -15,8 +15,9 @@
 # containers-storage cache under this task's runtime space: the host's global
 # podman storage is never mounted or touched, nothing is pruned, and no host
 # configuration changes. There is no fallback to building locally and nothing
-# is published anywhere -- the NAS is the sole source and delivery authority,
-# and every output of this script lives under TASK_ROOT.
+# is pushed to a container registry: the NAS stays the source and delivery
+# authority and the install/upgrade artifacts are also published to a GitHub
+# Release. Every output of this script lives under TASK_ROOT.
 #
 # Params:
 #   TASK_ROOT  (required, absolute)  This build task's server runtime space.
@@ -262,14 +263,16 @@ done
 ostree fsck --repo="${ROOT}/ostree/repo"
 
 # The BIB image records the local build reference (a localhost image that no
-# flashed device can pull), which would break bootc updates. Repoint the single
-# deployment at the official Beta channel, keeping every other origin field.
+# flashed device can pull). This is a personal build: its OTA path is the
+# external armada-danyi-update helper, which imports an OCI image from a GitHub
+# Release. The deployment is deliberately NOT repointed at the official Beta
+# channel -- doing so would let a later official update replace this customised
+# system layer. The Linux/Steam built-in official update entry point is disabled
+# for that reason; rebooting after an import is left to the user.
 [ -f "${ORIGIN}" ] || { echo "ERROR: deployment origin missing: ${ORIGIN}" >&2; exit 1; }
 original_ref="$(sed -n 's/^container-image-reference=//p' "${ORIGIN}")"
 [ -n "${original_ref}" ] \
     || { echo "ERROR: no container-image-reference in ${ORIGIN}" >&2; exit 1; }
-new_ref="ostree-unverified-registry:ghcr.io/armada-os/armada:beta"
-sed -i "s#^container-image-reference=.*#container-image-reference=${new_ref}#" "${ORIGIN}"
 
 cat > /output/update-source.txt <<EOF
 This disk image's single ostree deployment carries its bootc update source.
@@ -277,15 +280,14 @@ This disk image's single ostree deployment carries its bootc update source.
 Original container-image-reference (recorded by the local build):
   ${original_ref}
 
-Rewritten to the Armada Beta channel:
-  ${new_ref}
-
-Reason: the build reference is a localhost image that does not exist on a
-flashed device, so on-device updates would fail. Pointing at the official Beta
-channel is the source Armada devices already update from, so OTA updates
-resume; a later official update will, however, replace this customised system
-layer with the upstream one. This image is delivered only through the NAS:
-nothing is published to GHCR, and no paid storage is added.
+This is a personal build and is NOT repointed at the official Beta channel:
+doing so would let a later official update replace this customised system layer.
+Updates are instead applied with the external armada-danyi-update helper, which
+imports an OCI image from a GitHub Release. The built-in official update entry
+point (Linux/Steam) is therefore disabled for this build, and rebooting after an
+import is left to the user. Both the install and upgrade artifacts are
+published to a GitHub Release while the NAS copy is kept as well; nothing is
+pushed to a container registry.
 EOF
 
 # Checking or repairing needs the partitions unmounted: unmount, then check each

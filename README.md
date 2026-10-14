@@ -15,6 +15,13 @@
   Armada brings Steam, FEX, Proton, and a full Linux desktop to supported ARM64 gaming handhelds.
 </p>
 
+> [!IMPORTANT]
+> This is **Danyi's personal Armada build**. Install and OCI upgrade artifacts are
+> published on the [Releases](https://github.com/mydanyi/armada-danyi-build/releases)
+> page. See [`personal-build/USAGE.md`](personal-build/USAGE.md) for installation
+> and upgrade instructions. The rest of this README is the upstream Armada README.
+
+
 <p align="center">
   <a href="https://github.com/armada-os/armada/actions/workflows/build.yml"><img alt="Build status" src="https://github.com/armada-os/armada/actions/workflows/build.yml/badge.svg?branch=main"></a>
   <a href="https://armadaos.dev/"><img alt="Documentation" src="https://img.shields.io/badge/docs-armadaos.dev-18181a?style=flat"></a>

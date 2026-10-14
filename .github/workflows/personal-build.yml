@@ -1,26 +1,35 @@
-name: Armada personal image
+name: Armada Danyi image and upgrade
 
-# Private, runner-local build of the personalized Armada image.
+# Personal, publicly published build of the personalized Armada image.
 #
 # Everything runs on this self-hosted Docker runner only: nothing is pushed to
-# a public registry or a Release and no device is deployed here. The heavy
-# build CPU lives solely on the build server's Docker daemon (its socket is
-# bind-mounted into the runner); the NAS is used only as an authoritative store
-# for the source, logs, metadata and the finished image.
+# a container registry (no GHCR). The heavy build CPU lives solely on the build
+# server's Docker daemon (its socket is bind-mounted into the runner); the NAS
+# is used as an authoritative store for the source, logs, metadata and the
+# finished image. The packaged install and upgrade artifacts are additionally
+# published to a GitHub Release, but only when the manual run asks for it.
 #
 # The official workflows were moved to .github/upstream-workflows and no longer
 # run automatically; this file does not touch them.
 #
 # All ARMADA_* values (execution base and NAS endpoint/key/known-hosts) are
-# already present in the runner environment; no GitHub secret is added.
+# already present in the runner environment; no GitHub secret is added. The
+# Release steps reuse only the automatic GITHUB_TOKEN.
 
-# This workflow is manual-only: it never triggers on push, schedule or any
-# upstream code sync. It is started explicitly via "Run workflow".
+# This workflow is manual-only: it never triggers on push, tag, schedule or any
+# upstream code sync. It is started explicitly via "Run workflow", and it only
+# publishes a Release when the publish_release input is set to true.
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish the completed GitHub Release from the packaged artifacts
+        type: boolean
+        required: false
+        default: false
 
 permissions:
-  contents: read
+  contents: write
 
 # Exactly one full personal build at a time: a newly queued run waits for the
 # in-flight build to finish instead of cancelling it, so a complete image is
@@ -58,7 +67,10 @@ jobs:
             || { echo "ERROR: ARMADA_EXECUTION_BASE must be absolute: ${ARMADA_EXECUTION_BASE}" >&2; exit 2; }
 
           BUILD_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          ARMADA_VERSION="$(date -u +%Y%m%d).personal.${GITHUB_RUN_NUMBER}.${GITHUB_SHA:0:8}"
+          shortsha="${GITHUB_SHA:0:8}"
+          # Unique on every run: the Hong Kong calendar date, the monotonic run
+          # number and the short commit are all part of the version string.
+          ARMADA_VERSION="$(TZ=Asia/Hong_Kong date +%Y%m%d).danyi.${GITHUB_RUN_NUMBER}.${shortsha}"
           TASK_ROOT="${ARMADA_EXECUTION_BASE}/runs/${BUILD_ID}"
           SRC_ROOT="${GITHUB_WORKSPACE}"
 
@@ -128,6 +140,41 @@ jobs:
         shell: bash
         run: bash personal-build/build-disk.sh "${TASK_ROOT}" "${SRC_ROOT}"
 
+      - name: Build OCI upgrade archive
+        shell: bash
+        # Packages TASK_ROOT/work/rootfs.tar into the OCI archive that the
+        # installed-device upgrade path consumes.
+        run: bash personal-build/build-oci.sh "${TASK_ROOT}" "${SRC_ROOT}"
+
+      - name: Run release tests
+        shell: bash
+        # The offline release tests run in the same local tool image as the OCI
+        # step, with no network: the source is mounted read-only at /src, the
+        # tests' scratch space is this task's work/tests mounted at /test-work,
+        # and TMPDIR points there so no fixture lands outside the task.
+        run: |
+          set -euo pipefail
+          mkdir -p "${TASK_ROOT}/work/tests"
+          docker run --rm --network none \
+            --platform linux/amd64 \
+            -e TMPDIR=/test-work \
+            -v "${SRC_ROOT}:/src:ro" \
+            -v "${TASK_ROOT}/work/tests:/test-work" \
+            --entrypoint /bin/bash \
+            local/armada-personal-disk-builder:checked \
+            -c '
+              set -euo pipefail
+              bash /src/personal-build/tests/upgrade-release-test.sh
+              bash /src/personal-build/tests/personal-update-target-test.sh
+              bash /src/personal-build/tests/package-hash-failure-test.sh
+            '
+
+      - name: Package release artifacts
+        shell: bash
+        # Splits the install image and the OCI archive, writes SHA256SUMS and
+        # stages everything under TASK_ROOT/output/release/ for upload.
+        run: bash personal-build/package-release.sh "${TASK_ROOT}" "${SRC_ROOT}"
+
       - name: Publish results to NAS
         if: always()
         shell: bash
@@ -138,33 +185,74 @@ jobs:
           set -e
 
           task_root="${TASK_ROOT:-}"
-          nas_target="${ARMADA_NAS_TARGET:-unknown}"
 
-          present="no"
-          names=""
+          install_present="no"
+          install_names=""
+          oci_present="no"
+          oci_names=""
           if [[ -n "${task_root}" && -d "${task_root}/output" ]]; then
             shopt -s nullglob
             imgs=( "${task_root}/output"/armada-*.img.gz )
+            ocis=( "${task_root}/output"/armada-*.oci.tar )
             shopt -u nullglob
             if (( ${#imgs[@]} > 0 )); then
-              present="yes"
-              names="$(printf '%s ' "${imgs[@]##*/}")"
+              install_present="yes"
+              install_names="$(printf '%s ' "${imgs[@]##*/}")"
+            fi
+            if (( ${#ocis[@]} > 0 )); then
+              oci_present="yes"
+              oci_names="$(printf '%s ' "${ocis[@]##*/}")"
             fi
           fi
 
           {
-            echo "## Armada personal image"
+            echo "## Armada Danyi image and upgrade"
             echo
             echo "| field | value |"
             echo "| --- | --- |"
             echo "| version | \`${ARMADA_VERSION:-unknown}\` |"
             echo "| build id | \`${BUILD_ID:-unknown}\` |"
-            echo "| NAS run dir | \`${nas_target}/runs/${BUILD_ID:-unknown}\` |"
-            echo "| product present | ${present}${names:+ (${names})} |"
+            echo "| install image | ${install_present}${install_names:+ (${install_names})} |"
+            echo "| upgrade OCI | ${oci_present}${oci_names:+ (${oci_names})} |"
             echo "| NAS upload exit | ${sync_rc} |"
             echo
             echo "> Not yet validated on real hardware."
-            echo "> A manual official Beta update may overwrite the customized system layer."
           } >> "${GITHUB_STEP_SUMMARY}"
 
           exit "${sync_rc}"
+
+      - name: Create draft release
+        id: release
+        # Only a fully successful build that was explicitly asked to publish a
+        # Release reaches this step; the Release stays a draft until the PATCH
+        # below, so an incomplete attachment is never exposed publicly.
+        if: ${{ success() && github.event.inputs.publish_release == 'true' }}
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          tag_name: v${{ env.ARMADA_VERSION }}
+          name: Armada Danyi ${{ env.ARMADA_VERSION }}
+          target_commitish: ${{ github.sha }}
+          draft: true
+          body_path: personal-build/RELEASE-NOTES.md
+          fail_on_unmatched_files: true
+          files: ${{ env.TASK_ROOT }}/output/release/*
+
+      - name: Publish the release
+        # Flip the freshly created draft to a public, latest release only after
+        # every asset uploaded successfully. The token comes solely from the
+        # environment and is never printed (`set -x` is deliberately not used).
+        if: ${{ success() && github.event.inputs.publish_release == 'true' }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: |
+          set -euo pipefail
+          : "${GITHUB_TOKEN:?GITHUB_TOKEN missing}"
+          : "${RELEASE_ID:?release id missing}"
+          curl -fsSL -X PATCH \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -d '{"draft":false,"make_latest":"true"}'

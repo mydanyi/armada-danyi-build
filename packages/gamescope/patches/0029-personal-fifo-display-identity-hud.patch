@@ -1,0 +1,413 @@
+Personal build 0029: FIFO display identity HUD
+===============================================
+
+Mechanically exported (Python difflib) from the accepted sources of
+odin-mh-pacing-20261014-61e82b9a (exact-base / fifo-base -> fifo-fix-exact).
+
+Scope / provenance:
+  * Upstream #2417 is preserved. It is already carried by 0028; this patch
+    does NOT duplicate it.
+  * FIFO source: Valve commit 77f3d88a2c14b1e064bb3ec52380bfb46560b0b7.
+  * DRM immutable frame identity.
+  * HUD field semantics: the variant selected by the user, a10d45c6.
+
+Constraints honored by this export:
+  * Accepted sources are not modified.
+  * 5ec44c82 is not restored.
+  * The whole relative-present timing block is not inserted.
+  * Patch generation only: no git and no build is performed.
+
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -33,6 +33,7 @@
+ #include "HDRGamma22.h"
+ #include "HDRTonemap.h"
+ #include "gamescope_shared.h"
++#include "Utils/CommitQueue.h"
+ #include "xwayland_ctx.hpp"
+ #include <X11/X.h>
+ #include <X11/Xlib.h>
+@@ -2529,6 +2530,11 @@
+ 	if ( !layer )
+ 		return;
+ 
++	// Record the cached commit we actually drew. A normal BasePlane paint later
++	// in the frame overwrites this with its own commit during fades.
++	frameInfo->ulBasePlaneCommitID = commit->commitID;
++	frameInfo->uBasePlaneAppID = commit->appID;
++
+ 	layer->opacity = bOverrideOpacity ? flOpacityScale : base.opacity * flOpacityScale;
+ 
+ 	layer->tex = commit->GetTexture( base.eUpscaleFilter, base.eUpscaleScaler, layer->colorspace );
+@@ -2851,6 +2857,9 @@
+ 		pFocus->ulBasePlaneCommitID = lastCommit->commitID;
+ 		pFocus->uBasePlaneAppID = lastCommit->appID;
+ 		pFocus->bBasePlaneIsFifo = lastCommit->IsPerfOverlayFIFO();
++
++		frameInfo->ulBasePlaneCommitID = lastCommit->commitID;
++		frameInfo->uBasePlaneAppID = lastCommit->appID;
+ 	}
+ }
+ 
+@@ -3205,6 +3214,8 @@
+ 	frameInfo.eUpscaleFilter = pFocus->eUpscaleFilter;
+ 	frameInfo.eUpscaleScaler = pFocus->eUpscaleScaler;
+ 	frameInfo.nUpscaleSharpness = pFocus->nUpscaleSharpness;
++	frameInfo.ulBasePlaneCommitID = pFocus->ulBasePlaneCommitID;
++	frameInfo.uBasePlaneAppID = pFocus->uBasePlaneAppID;
+ 
+ 	// With no window a lease companion presents an empty frame to power its output down.
+ 	if ( g_sDrmLeaseClientSocket && !w )
+@@ -8017,8 +8028,15 @@
+ 	XSetSelectionOwner(ctx->dpy, net_system_tray, ctx->ourWindow, 0);
+ }
+ 
+-bool handle_done_commit( steamcompmgr_win_t *w, xwayland_ctx_t *ctx, uint64_t commitID, uint64_t earliestPresentTime, uint64_t earliestLatchTime )
+-{
++gamescope::CommitQueue::SelectionResult handle_done_commit( steamcompmgr_win_t *w, xwayland_ctx_t *ctx, uint64_t commitID, uint64_t earliestPresentTime, uint64_t earliestLatchTime )
++{
++	// Gate on FIFO head-of-line blocking before touching any engine/selection
++	// state. Fence completion order is not submission order, so a commit that
++	// latched out of order must stay deferred behind its unlatched predecessor.
++	const auto selection = gamescope::CommitQueue::Select( w->commit_queue, commitID );
++	if ( selection.first != gamescope::CommitQueue::SelectionResult::Ready )
++		return selection.first;
++
+ 	bool bFoundWindow = false;
+ 	uint32_t j;
+ 	for ( j = 0; j < w->commit_queue.size(); j++ )
+@@ -8112,10 +8130,10 @@
+ 		if ( j > 0 )
+ 			w->commit_queue.erase( w->commit_queue.begin(), w->commit_queue.begin() + j );
+ 		w->receivedDoneCommit = true;
+-		return true;
+-	}
+-
+-	return false;
++		return gamescope::CommitQueue::SelectionResult::Ready;
++	}
++
++	return gamescope::CommitQueue::SelectionResult::Missing;
+ }
+ 
+ // TODO: Merge these two functions.
+@@ -8171,10 +8189,21 @@
+ 			continue;
+ 		}
+ 
+-		if ( entry_win && handle_done_commit(entry_win, ctx, entry.commitID, entry.earliestPresentTime, entry.earliestLatchTime) )
+-		{
+-			if (entry.fifo)
+-				fifo_win_seqs.insert(entry.winSeq);
++		if ( entry_win )
++		{
++			switch ( handle_done_commit(entry_win, ctx, entry.commitID, entry.earliestPresentTime, entry.earliestLatchTime) )
++			{
++				case gamescope::CommitQueue::SelectionResult::Blocked:
++					// Earlier same-surface FIFO commit not latched yet: defer.
++					commits_before_their_time.push_back( entry );
++					break;
++				case gamescope::CommitQueue::SelectionResult::Ready:
++					if (entry.fifo)
++						fifo_win_seqs.insert(entry.winSeq);
++					break;
++				case gamescope::CommitQueue::SelectionResult::Missing:
++					break;
++			}
+ 		}
+ 	}
+ 
+@@ -8230,13 +8259,26 @@
+ 		if ( entry.desiredPresentTime > next_refresh_time )
+ 		{
+ 			commits_before_their_time.push_back( entry );
+-			break;
+-		}
+-
+-		if ( entry_win && handle_done_commit(entry_win, nullptr, entry.commitID, entry.earliestPresentTime, entry.earliestLatchTime) )
+-		{
+-			if (entry.fifo)
+-				fifo_win_seqs.insert(entry.winSeq);
++			// continue (not break): an entry that is too early must not drop the
++			// later entries queued behind it when the list is swapped below.
++			continue;
++		}
++
++		if ( entry_win )
++		{
++			switch ( handle_done_commit(entry_win, nullptr, entry.commitID, entry.earliestPresentTime, entry.earliestLatchTime) )
++			{
++				case gamescope::CommitQueue::SelectionResult::Blocked:
++					// Earlier same-surface FIFO commit not latched yet: defer.
++					commits_before_their_time.push_back( entry );
++					break;
++				case gamescope::CommitQueue::SelectionResult::Ready:
++					if (entry.fifo)
++						fifo_win_seqs.insert(entry.winSeq);
++					break;
++				case gamescope::CommitQueue::SelectionResult::Missing:
++					break;
++			}
+ 		}
+ 	}
+ 
+@@ -8671,8 +8713,14 @@
+ 		newCommit->SetFence( fence, mango_nudge, uMangoMsgType, doneCommits );
+ 		if ( bKnownReady )
+ 			newCommit->Signal();
+-		else
+-			g_ImageWaiter.AddWaitable( newCommit.get() );
++		else if ( !g_ImageWaiter.AddWaitable( newCommit.get() ) )
++		{
++			// Upstream 77f3d88: the waitable was not registered, so do not
++			// queue this commit. Preserve frame-callback progress and bail;
++			// RAII on newCommit closes the fence when it is destroyed.
++			w->receivedDoneCommit = true;
++			return;
++		}
+ 	}
+ 
+ 	w->commit_queue.push_back( std::move(newCommit) );
+--- a/src/rendervulkan.hpp
++++ b/src/rendervulkan.hpp
+@@ -293,6 +293,9 @@
+ 	bool bFadingOut;
+ 	BlurMode blurLayer0;
+ 	int blurRadius;
++	// Identity of the commit/app painted as the base plane this frame.
++	uint64_t ulBasePlaneCommitID = 0;
++	uint32_t uBasePlaneAppID = 0;
+ 
+ 	gamescope::Rc<CVulkanTexture> shaperLut[EOTF_Count];
+ 	gamescope::Rc<CVulkanTexture> lut3D[EOTF_Count];
+--- a/src/mangoapp.cpp
++++ b/src/mangoapp.cpp
+@@ -30,10 +30,10 @@
+     struct mangoapp_msg_header hdr;
+ 
+     uint32_t pid;
+-    uint64_t app_frametime_ns;
++    uint64_t visible_frametime_ns;
+     uint8_t fsrUpscale;
+     uint8_t fsrSharpness;
+-    uint64_t visible_frametime_ns;
++    uint64_t app_frametime_ns;
+     uint64_t latency_ns;
+     uint32_t outputWidth;
+     uint32_t outputHeight;
+@@ -46,6 +46,14 @@
+ 
+     // WARNING: Always ADD fields, never remove or repurpose fields
+ } __attribute__((packed));
++
++// External contract: the published MangoHud v1 wire layout places the visible
++// interval before the FSR bytes and the app/debug interval after them; keep
++// version 1 wire compatibility.
++static_assert(offsetof(mangoapp_msg_v1, visible_frametime_ns) == sizeof(long) + 8,
++              "MangoHud v1 wire contract: visible_frametime_ns must be at sizeof(long)+8 (16 on LP64)");
++static_assert(offsetof(mangoapp_msg_v1, app_frametime_ns) == sizeof(long) + 18,
++              "MangoHud v1 wire contract: app_frametime_ns must be at sizeof(long)+18 (26 on LP64)");
+ 
+ void init_mangoapp(){
+     // A lease client must not feed the session's shared mangoapp queue
+@@ -260,16 +268,16 @@
+ extern uint32_t g_uCurrentBasePlaneAppID;
+ extern gamescope::ConVar<bool> cv_mangoapp_use_output_timing;
+ 
+-void mangoapp_output_update( uint64_t vblanktime )
++void mangoapp_output_update( uint64_t vblanktime, uint64_t ulBasePlaneCommitID, uint32_t uBasePlaneAppID )
+ {
+ 	static uint64_t s_uLastBasePlaneCommitID = 0;
+-	if ( s_uLastBasePlaneCommitID != g_uCurrentBasePlaneCommitID )
++	if ( s_uLastBasePlaneCommitID != ulBasePlaneCommitID )
+ 	{
+ 		static uint64_t s_uLastBasePlaneUpdateVBlankTime = vblanktime;
+         uint64_t last_frametime = s_uLastBasePlaneUpdateVBlankTime;
+         uint64_t frametime = vblanktime - last_frametime;
+ 		s_uLastBasePlaneUpdateVBlankTime = vblanktime;
+-		s_uLastBasePlaneCommitID = g_uCurrentBasePlaneCommitID;
++		s_uLastBasePlaneCommitID = ulBasePlaneCommitID;
+         if ( last_frametime > vblanktime )
+             return;
+ 
+@@ -278,8 +286,16 @@
+         if ( cv_mangoapp_use_output_timing )
+         {
+             wlserver_lock();
+-            wlserver_app_presented( g_uCurrentBasePlaneAppID, frametime );
++            wlserver_app_presented( uBasePlaneAppID, frametime );
+             wlserver_unlock();
+         }
+ 	}
+ }
++
++// Retains the legacy Vulkan-swapchain backend behavior: the original one-argument
++// entry point stays valid for the existing compiled rendervulkan.cpp callers, while
++// the DRM path supplies the transaction metadata explicitly through the overload above.
++void mangoapp_output_update( uint64_t vblanktime )
++{
++	mangoapp_output_update( vblanktime, g_uCurrentBasePlaneCommitID, g_uCurrentBasePlaneAppID );
++}
+--- a/src/Backends/DRMBackend.cpp
++++ b/src/Backends/DRMBackend.cpp
+@@ -627,6 +627,8 @@
+ struct DRMPresentCtx
+ {
+ 	uint64_t ulPendingFlipCount = 0;
++	uint64_t ulBasePlaneCommitID = 0;
++	uint32_t uBasePlaneAppID = 0;
+ };
+ 
+ extern gamescope::ConVar<bool> cv_composite_force;
+@@ -910,7 +912,7 @@
+ 	return false;
+ }
+ 
+-extern void mangoapp_output_update( uint64_t vblanktime );
++extern void mangoapp_output_update( uint64_t vblanktime, uint64_t ulBasePlaneCommitID, uint32_t uBasePlaneAppID );
+ static void page_flip_handler(int fd, unsigned int frame, unsigned int sec, unsigned int usec, unsigned int crtc_id, void *data)
+ {
+ 	// A lease fd is shared with the other holders, whose events carry
+@@ -949,10 +951,15 @@
+ 		g_DRM.m_QueuedFbIds.clear();
+ 	}
+ 
++	// Capture the per-submission identity from the ctx before we drop the
++	// refcount: the producer may reuse this ctx as soon as notify_all() wakes.
++	const uint64_t ulBasePlaneCommitID = pCtx->ulBasePlaneCommitID;
++	const uint32_t uBasePlaneAppID = pCtx->uBasePlaneAppID;
++
+ 	g_DRM.uPendingFlipCount--;
+ 	g_DRM.uPendingFlipCount.notify_all();
+ 
+-	mangoapp_output_update( vblanktime );
++	mangoapp_output_update( vblanktime, ulBasePlaneCommitID, uBasePlaneAppID );
+ 
+ 	// Nudge so that steamcompmgr releases commits.
+ 	nudge_steamcompmgr();
+@@ -5241,6 +5248,8 @@
+ 			FrameInfo_t presentCompFrameInfo = {};
+ 			presentCompFrameInfo.allowVRR = pFrameInfo->allowVRR;
+ 			presentCompFrameInfo.outputEncodingEOTF = pFrameInfo->outputEncodingEOTF;
++			presentCompFrameInfo.ulBasePlaneCommitID = pFrameInfo->ulBasePlaneCommitID;
++			presentCompFrameInfo.uBasePlaneAppID = pFrameInfo->uBasePlaneAppID;
+ 			// The composited frame keeps the output LUTs; turning them off would be a modeset.
+ 			presentCompFrameInfo.outputLuts = pFrameInfo->outputLuts;
+ 
+@@ -5581,6 +5590,8 @@
+ 			uint32_t uCurrentPresentCtx = m_uNextPresentCtx;
+ 			m_uNextPresentCtx = ( m_uNextPresentCtx + 1 ) % 3;
+ 			m_PresentCtxs[uCurrentPresentCtx].ulPendingFlipCount = g_DRM.pConnector->PresentationFeedback().m_uQueuedPresents;
++			m_PresentCtxs[uCurrentPresentCtx].ulBasePlaneCommitID = pFrameInfo->ulBasePlaneCommitID;
++			m_PresentCtxs[uCurrentPresentCtx].uBasePlaneAppID = pFrameInfo->uBasePlaneAppID;
+ 
+ 			drm_log.debugf("flip commit %" PRIu64, (uint64_t)g_DRM.pConnector->PresentationFeedback().m_uQueuedPresents);
+ 			gpuvis_trace_printf( "flip commit %" PRIu64, (uint64_t)g_DRM.pConnector->PresentationFeedback().m_uQueuedPresents );
+--- a/src/commit.h
++++ b/src/commit.h
+@@ -1,6 +1,7 @@
+ #include "steamcompmgr_shared.hpp"
+ #include "Utils/NonCopyable.h"
+ 
++#include <atomic>
+ #include <optional>
+ #include "main.hpp"
+ #include "rendervulkan.hpp"
+@@ -82,4 +83,9 @@
+ 	// Typed mangoapp stream to nudge, 0 for none, never the legacy type.
+ 	uint32_t m_uMangoMsgType = 0;
+ 	CommitDoneList_t *m_pDoneCommits = nullptr; // I hate this
++
++	// Set when the fence is torn down without completing (stale hang-up), so a
++	// torn-down frame must not block later FIFO commits. Appended last on
++	// purpose: it must not shift commitID/fifo offsets relied on elsewhere.
++	std::atomic<bool> abandoned = false;
+ };
+\ No newline at end of file
+--- a/src/commit.cpp
++++ b/src/commit.cpp
+@@ -90,8 +90,16 @@
+ 
+ void commit_t::OnPollHangUp()
+ {
+-    std::unique_lock lock( m_WaitableCommitStateMutex );
+-    CloseFenceInternal();
++    {
++        std::unique_lock lock( m_WaitableCommitStateMutex );
++        // A stale hang-up arriving after the fence already fired (OnPollIn
++        // closes it) must not mark a normal frame abandoned.
++        if ( !CloseFenceInternal() )
++            return;
++    }
++
++    abandoned = true;
++    nudge_steamcompmgr();
+ }
+ 
+ bool commit_t::IsPerfOverlayFIFO()
+--- /dev/null
++++ b/src/Utils/CommitQueue.h
+@@ -0,0 +1,63 @@
++// fifo-fix-exact/src/Utils/CommitQueue.h
++//
++// GREEN phase. FIFO head-of-line blocking selector: the FIFO portion of Valve's
++// pinned commit 77f3d88a2c14b1e064bb3ec52380bfb46560b0b7.
++//
++// The upstream selector also gates on relative present-timing targets, but this
++// baseline predates those interfaces, so only the FIFO portion is reproduced: a
++// FIFO commit is Blocked while any earlier same-surface FIFO commit is still
++// unlatched (and not abandoned). Fence completion order does not imply
++// submission order, which is exactly why a later commit may latch ("done")
++// before an earlier one -- the selector must not report it Ready then.
++//
++// The ordering regression in ../commit-queue-regression.cpp pins this down.
++
++#pragma once
++
++#include <algorithm>
++#include <cstdint>
++#include <utility>
++
++namespace gamescope::CommitQueue
++{
++
++enum class SelectionResult
++{
++	Missing,
++	Blocked,
++	Ready,
++};
++
++// Look up commitID in the recorded queue (submission order preserved).
++//
++// Returns:
++//   { Missing, queue.end() } -- commitID was never recorded
++//   { Blocked, iterator    } -- an earlier same-surface FIFO commit is still
++//                              unlatched, so completion order must not be
++//                              mistaken for submission order
++//   { Ready,   iterator    } -- commitID was found and is not blocked
++//
++// The iterator points at the matching queue entry so callers can reuse the real
++// handle_done_commit() loop and erase() exactly as before.
++template <typename Queue>
++auto Select( Queue &queue, uint64_t commitID )
++	-> std::pair<SelectionResult, typename Queue::iterator>
++{
++	auto it = std::find_if( queue.begin(), queue.end(), [commitID]( const auto &commit )
++	{
++		return commit->commitID == commitID;
++	} );
++
++	if ( it == queue.end() )
++		return std::make_pair( SelectionResult::Missing, it );
++
++	// Fence completion order does not imply submission order, which FIFO needs.
++	const bool blocked = (*it)->fifo && std::any_of( queue.begin(), it, [&]( const auto &commit )
++	{
++		return commit->surf == (*it)->surf && commit->fifo && !commit->done && !commit->abandoned;
++	} );
++
++	return std::make_pair( blocked ? SelectionResult::Blocked : SelectionResult::Ready, it );
++}
++
++}

@@ -256,6 +256,12 @@ armada_desired_channel() {
 
 armada_update_target() {
     local ref="$1" booted repository desired
+    # Personal build: updates come from armada-danyi-update (an OCI import from
+    # a GitHub Release), never from the official channels. A personal-build
+    # marker on disk means the official path must not overwrite this system.
+    if [[ -e /usr/share/armada/personal-build/plugins.lock.json ]]; then
+        return 1
+    fi
     booted="$(armada_tag_from_ref "$ref")"
     if repository="$(armada_repository_from_ref "$ref")"; then
         if [[ -z "$booted" ]]; then
@@ -270,8 +276,8 @@ armada_update_target() {
             desired="$(armada_desired_channel "$booted")"
         fi
     else
-        repository="$ARMADA_CANONICAL_REGISTRY"
-        desired="$(armada_desired_channel "$booted")"
+        # Non-registry OCI source: do not fall back to the official channel.
+        return 1
     fi
     [[ -n "$repository" && -n "$desired" && \
         "$repository" != *[[:space:]]* && "$desired" != *[[:space:]]* ]] || return 1

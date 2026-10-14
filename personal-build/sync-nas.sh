@@ -28,7 +28,7 @@
 #                           temp file that is removed on exit).
 #   ARMADA_NAS_KNOWN_HOSTS  known_hosts: a path to a readable file, or content.
 #   ARMADA_NAS_TARGET       <user>@<host>:<root>, e.g.
-#                           danyi@192.168.50.38:/vol2/1000/.../armada-...
+#                           user@nas:/absolute/task-root
 #                           <root> is the per-task NAS root directory.
 #   TASK_ROOT               Absolute path of this task's server runtime space.
 #   SRC_ROOT                Absolute path of the checkout on this runner.
@@ -159,7 +159,7 @@ archive_source() {
 do_source() {
     ensure_remote_dirs
     probe_writable
-    echo "==> NAS run directory is writable; archiving source -> ${NAS_USERHOST}:${REMOTE_RUN}/source/"
+    echo "==> NAS task directory is writable; archiving source to the configured NAS task directory"
     archive_source
     echo "==> Source archive complete"
 }
@@ -194,12 +194,16 @@ do_results() {
     # Always publish whatever the task's output/ holds -- on failure this keeps
     # the kernel artifacts and evidence metadata the run did produce -- but never
     # the raw disk image: disk.raw and any *.raw are useless when the run failed
-    # and the logs already describe them.
+    # and the logs already describe them. Release split volumes (*.part*) are also
+    # skipped: the NAS keeps the complete .img.gz and .oci.tar plus the small
+    # metadata, while the volumes exist only for the GitHub Release, so the same
+    # package is not uploaded to the NAS a second time.
     if [[ -d "${TASK_ROOT}/output" ]]; then
-        echo "==> Publishing output (excluding raw disk images)"
+        echo "==> Publishing output (excluding raw disk images and release volumes)"
         rsync -a --no-owner --no-group -s -e "${RSYNC_SSH}" \
             --exclude='/image/disk.raw' \
             --exclude='*.raw' \
+            --exclude='/release/*.part*' \
             "${TASK_ROOT}/output/" "${NAS_USERHOST}:${REMOTE_RUN}/output/"
     else
         echo "==> No ${TASK_ROOT}/output directory to publish"

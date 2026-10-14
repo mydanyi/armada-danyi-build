@@ -60,3 +60,6 @@ to a commit, or `armada` if it's original; a URL source with no `notes` is verba
   source: armada
 - `patches/0028-improve-frame-pacing.patch`
   source: https://github.com/ValveSoftware/gamescope/pull/2417
+- `patches/0029-personal-fifo-display-identity-hud.patch`
+  source: armada
+  notes: FIFO head-of-line blocking ported from Valve commit 77f3d88a2c14b1e064bb3ec52380bfb46560b0b7; the DRM display transaction preserves the base/app identity; keeps the HUD field order of the user-accepted version. 0028-improve-frame-pacing is retained as-is; the 2417 change is not re-added.
