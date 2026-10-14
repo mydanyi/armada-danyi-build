@@ -1,19 +1,24 @@
 name: Sync Armada upstream
 
-# Daily merge of armada-os/armada main into this personal build repo.
+# Merge armada-os/armada main into this personal build repo.
 #
-# Runs only on the schedule below and manual dispatch -- never on push, so the
-# merge it makes cannot re-trigger itself. The personal layer (custom workflows,
-# Chinese/plugin/unmerged patches, build config) is kept as is. It never builds
-# an image, opens a PR or dispatches a workflow: the personal image is still
-# built manually and separately. The push uses a dedicated, repo-scoped write
-# deploy key already provisioned on the runner; this workflow neither reads nor
-# prints the key and adds no GitHub secret.
+# Manual-only. The daily merge is run by the server-side systemd timer
+# armada-personal-upstream-sync.timer on the 192.168.88.9 host, which starts the
+# sync script inside the existing Docker runner. This GitHub workflow's schedule
+# produced no runs during verification, so it is kept for manual sync only;
+# start it via "Run workflow" for an on-demand sync.
+#
+# Never runs on push, so the merge it makes cannot re-trigger itself. The
+# personal layer (custom workflows, Chinese/plugin/unmerged patches, build
+# config) is kept as is. It never builds an image, opens a PR or dispatches a
+# workflow: the personal image is still built manually and separately. The push
+# uses a dedicated, repo-scoped write deploy key already provisioned on the
+# runner; this workflow never prints deploy-key contents and adds no GitHub
+# secret.
 on:
-  schedule:
-    # TEMPORARY: 5-minute validation for GitHub not emitting the schedule event.
-    # Restore daily 04:17 Asia/Hong_Kong (20:17 UTC '17 20 * * *') after Codex verifies.
-    - cron: '*/5 * * * *'
+  # Manual-only: the daily 04:17 Asia/Hong_Kong sync is performed by the server
+  # timer (armada-personal-upstream-sync.timer). Trigger this by hand for an
+  # ad-hoc sync.
   workflow_dispatch:
 
 permissions:

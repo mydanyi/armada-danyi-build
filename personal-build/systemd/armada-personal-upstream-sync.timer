@@ -1,0 +1,18 @@
+# Armada personal build -- daily upstream code sync timer.
+#
+# Fires the sync service once a day at 04:17 Asia/Hong_Kong, the time the
+# previously configured GitHub schedule used; that schedule did not emit runs
+# during verification.
+# Persistent=true catches up a missed run after the server was powered off.
+
+[Unit]
+Description=Daily Armada upstream code sync
+
+[Timer]
+OnCalendar=*-*-* 04:17:00 Asia/Hong_Kong
+Persistent=true
+AccuracySec=1s
+Unit=armada-personal-upstream-sync.service
+
+[Install]
+WantedBy=timers.target

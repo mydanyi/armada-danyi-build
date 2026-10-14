@@ -1,0 +1,16 @@
+# Armada personal build -- daily upstream code sync (server-side).
+#
+# Started by armada-personal-upstream-sync.timer. Runs the sync driver inside
+# the existing long-lived Docker runner on 192.168.88.9 with `docker exec`; it
+# does not start or restart the daemon or the runner container and leaves no
+# process behind (Type=oneshot -- the unit ends when the sync finishes).
+
+[Unit]
+Description=Armada personal daily upstream code sync
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec armada-personal-build-runner bash /home/danyi/codex-exec/armada-personal-build-20261011-617f1c87/automation/server-sync.sh
+TimeoutStartSec=15min
