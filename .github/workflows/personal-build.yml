@@ -14,10 +14,9 @@ name: Armada personal image
 # All ARMADA_* values (execution base and NAS endpoint/key/known-hosts) are
 # already present in the runner environment; no GitHub secret is added.
 
+# This workflow is manual-only: it never triggers on push, schedule or any
+# upstream code sync. It is started explicitly via "Run workflow".
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -153,16 +152,6 @@ jobs:
             fi
           fi
 
-          if [[ "${present}" == "yes" ]]; then
-            if [[ -f "${task_root}/logs/nas-verified.sha256" ]]; then
-              verify="passed (NAS read-back hash confirmed)"
-            else
-              verify="FAILED - NAS read-back hash not confirmed"
-            fi
-          else
-            verify="skipped (no product)"
-          fi
-
           {
             echo "## Armada personal image"
             echo
@@ -172,8 +161,7 @@ jobs:
             echo "| build id | \`${BUILD_ID:-unknown}\` |"
             echo "| NAS run dir | \`${nas_target}/runs/${BUILD_ID:-unknown}\` |"
             echo "| product present | ${present}${names:+ (${names})} |"
-            echo "| NAS read-back verification | ${verify} |"
-            echo "| results sync exit | ${sync_rc} |"
+            echo "| NAS upload exit | ${sync_rc} |"
             echo
             echo "> Not yet validated on real hardware."
             echo "> A manual official Beta update may overwrite the customized system layer."

@@ -11,7 +11,10 @@ let added = 0, fail = true, created;
 const context = { exports: {}, window: { SteamClient: { Apps: {
   AddShortcut: async () => { added++; return 123; },
   SpecifyCompatTool: async () => { if (fail) throw Error('temporary failure'); },
-} } } };
+} } }, require: (specifier) => {
+  if (specifier !== '../i18n') throw new Error(`unexpected require: ${specifier}`);
+  return { t: (key) => key };
+} };
 vm.runInNewContext(code, context);
 (async () => {
   const launch = { name: 'Example', exe: '/apps/base.apk', startDir: '/apps', launchOptions: '', compatTool: 'lepton_armada' };

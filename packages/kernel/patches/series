@@ -33,6 +33,8 @@
 0104a-drm-panel-visionox-vtdr6130-add-sm8250.patch
 0105-drm-panel-Add-Retroid-Pocket-Nova-panel.patch
 0106-drm-panel-il97680a-luminance-linear-backlight-scale.patch
+0107-drm-msm-dpu-AVR-variable-refresh-on-DSI-video-mode.patch
+0108-drm-msm-dpu-send-the-flip-event-after-the-vblank-irq.patch
 0064_Mangmi-Air-Y-Pro-panel.patch
 
 # ============== Panel power + backlight ==============
@@ -119,6 +121,7 @@ v9_20260729_qualcomm_crypto_qce_runtime_pm_interconnect.patch
 0533-scsi-ufs-ufs-qcom-enable-only-lane-clocks-in-lane-clock-apis.patch
 0535-scsi-ufs-core-fast-abort-unsupported-query-idns.patch
 0536-scsi-ufs-core-dynamically-disable-timestamp-on-unsupported-devices.patch
+0537-usb-xhci-pci-renesas-let-the-controller-power-off-in-suspend.patch
 0512-PCI-qcom-skip-L23-ready-poll-on-SM8550.patch
 0513-PCI-qcom-honour-an-opp-suspend-opp-as-the-non-s2ram-memory-floor.patch
 0522-PCI-host-common-let-only-endpoints-veto-d3cold.patch
@@ -142,6 +145,10 @@ v9_20260729_qualcomm_crypto_qce_runtime_pm_interconnect.patch
 # ============== WiFi ==============
 1020-wifi-ath12k-send-the-computed-scan-priority-to-the-f.patch
 1021-wifi-ath12k-convert-scan-timeout-to-wiphy-delayed-work.patch
+
+# ============== Video decode ==============
+1030-media-iris-send-the-stream-POC-type.patch
+1031-media-iris-stop-AV1-tier-overwriting-HEVC-tier.patch
 
 # ============== System tweaks ==============
 0500-ROCKNIX-set-boot-fanspeed.patch
@@ -221,6 +228,7 @@ v2_20260420_neil_armstrong_arm64_qcom_sm8650_misc_enhancements.patch
 0612-ROCKNIX-odin3-q6apm-start-mi2s-port-at-prepare.patch
 0613-ASoC-q6apm-scope-prepare-start-to-MI2S.patch
 0528-ASoC-qcom-sc8280xp-suspend-the-card-and-its-streams.patch
+0538-ASoC-qcom-sc8280xp-cap-Pocket-DS-speaker-digital-volume.patch
 0529-ASoC-qdsp6-q6apm-fail-the-graph-open-when-the-DSP-rejects-it.patch
 0530-ASoC-qdsp6-release-AudioReach-graphs-across-system-suspend.patch
 0532-hwmon-pwm-fan-optionally-run-the-fan-while-charging-in-s2idle.patch

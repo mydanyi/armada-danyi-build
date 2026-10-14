@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Armada personal build -- NAS transfer and read-back verification helper.
+# Armada personal build -- NAS transfer helper.
 #
 # Runs inside the self-hosted Docker runner and talks to the NAS over
 # SSH/rsync. Everything it writes on the NAS lives under
@@ -17,11 +17,9 @@
 #             TASK_ROOT/output/ holds (minus the raw disk images: disk.raw and
 #             any *.raw, whose logs already describe them), TASK_ROOT/logs/ and
 #             small metadata to the NAS, so a failed run still keeps its kernel
-#             artifacts and evidence. It never fabricates success: a missing
-#             product is reported as such. When a product exists it also
-#             re-reads it back from the NAS, hashes it on the build server's
-#             Docker (never heavy CPU on the NAS) and re-syncs the verification
-#             record.
+#             artifacts and evidence. Transfer-only: success is judged solely by
+#             the rsync exit status; the uploaded image is never re-read or
+#             re-hashed here (the NAS holds no hashing step).
 #
 # Required environment (the runner provides ARMADA_NAS_*; the workflow exports
 # TASK_ROOT/SRC_ROOT/BUILD_ID via $GITHUB_ENV):
@@ -83,19 +81,12 @@ mkdir -p "${TASK_ROOT}/work"
 SECRET_DIR="$(mktemp -d "${TASK_ROOT}/work/.nas-secrets.XXXXXX")"
 KEY_FILE="${SECRET_DIR}/id_nas"
 KNOWN_HOSTS_FILE="${SECRET_DIR}/known_hosts"
-NAS_HASH_CONTAINER=""
-NAS_HASH_CONTAINER_CREATED=0
 
-# Close only this task's own ephemeral container and credential files. The
-# long-lived runner, its caches and images are deliberately left untouched. A
-# container is only ever removed when this run actually created it.
+# Close only this task's own credential files. The long-lived runner, its
+# caches and images are deliberately left untouched.
 cleanup() {
     local rc=$?
     trap - EXIT INT TERM
-    if [[ "${NAS_HASH_CONTAINER_CREATED}" == "1" ]]; then
-        docker rm -f "${NAS_HASH_CONTAINER}" >/dev/null 2>&1 || true
-        NAS_HASH_CONTAINER_CREATED=0
-    fi
     rm -rf "${SECRET_DIR}"
     exit "${rc}"
 }
@@ -173,17 +164,6 @@ do_source() {
     echo "==> Source archive complete"
 }
 
-# Print the single armada-*.img.gz product, or nothing (always exit 0).
-product_path() {
-    shopt -s nullglob
-    local matches=( "${TASK_ROOT}/output"/armada-*.img.gz )
-    shopt -u nullglob
-    if [[ "${#matches[@]}" -eq 1 ]]; then
-        printf '%s' "${matches[0]}"
-    fi
-    return 0
-}
-
 # Small, non-heavy metadata only (never the rootfs.tar cache).
 publish_metadata() {
     local f
@@ -195,62 +175,6 @@ publish_metadata() {
         echo "==> evidence: $(basename "${f}")"
         sync_up "${f}" evidence/
     done
-}
-
-verify_product() {
-    local product="$1" base sums expected got
-    base="$(basename "${product}")"
-    sums="${TASK_ROOT}/output/SHA256SUMS.txt"
-    [[ -f "${sums}" ]] \
-        || { echo "ERROR: ${sums} not found; cannot verify ${base}" >&2; return 1; }
-
-    expected="$(awk -v f="${base}" '{
-        n=$2; sub(/^\*/,"",n); sub(/^.*\//,"",n);
-        if (n==f) { print $1; exit }
-    }' "${sums}")"
-    [[ -n "${expected}" ]] \
-        || { echo "ERROR: no checksum for ${base} in ${sums}" >&2; return 1; }
-
-    # Hash on the build server's Docker while the bytes stream in from the NAS;
-    # the NAS itself does no hashing. Create our own container explicitly and
-    # remember that we made it -- we never rm a name that might belong to
-    # something else, and only a container we created can ever be removed.
-    NAS_HASH_CONTAINER="armada-personal-nas-hash-${BUILD_ID}"
-    if ! docker create -i --name "${NAS_HASH_CONTAINER}" \
-            local/armada-personal-kernel-builder:ubuntu24 sha256sum >/dev/null; then
-        echo "ERROR: could not create NAS read-back container ${NAS_HASH_CONTAINER}" >&2
-        NAS_HASH_CONTAINER=""
-        return 1
-    fi
-    NAS_HASH_CONTAINER_CREATED=1
-
-    echo "==> Verifying ${base} by reading it back from the NAS"
-    if ! got="$(ssh "${SSH_OPTS[@]}" "${NAS_USERHOST}" "cat $(shq "${REMOTE_RUN}/output/${base}")" \
-            | docker start -ai "${NAS_HASH_CONTAINER}" \
-            | awk '{print $1}')"; then
-        echo "ERROR: NAS read-back hashing failed for ${base}" >&2
-        return 1
-    fi
-
-    if [[ "${NAS_HASH_CONTAINER_CREATED}" == "1" ]]; then
-        docker rm -f "${NAS_HASH_CONTAINER}" >/dev/null 2>&1 || true
-        NAS_HASH_CONTAINER_CREATED=0
-    fi
-    NAS_HASH_CONTAINER=""
-
-    if [[ "${got}" != "${expected}" ]]; then
-        echo "ERROR: NAS read-back hash mismatch for ${base}: nas=${got} local=${expected}" >&2
-        return 1
-    fi
-
-    # The record is only written once the hash has actually matched: a stale or
-    # mismatched file must never be mistaken for a confirmed verification.
-    echo "${got}  ${base}" > "${TASK_ROOT}/logs/nas-verified.sha256"
-    echo "==> NAS read-back verified ${base}: ${got}"
-    # Re-sync the verification record itself.
-    sync_up "${TASK_ROOT}/logs/nas-verified.sha256" evidence/
-    sync_up "${TASK_ROOT}/logs/nas-verified.sha256" logs/
-    return 0
 }
 
 do_results() {
@@ -266,9 +190,6 @@ do_results() {
         echo "==> Publishing logs"
         sync_up "${TASK_ROOT}/logs/" logs/
     fi
-
-    local product
-    product="$(product_path)"
 
     # Always publish whatever the task's output/ holds -- on failure this keeps
     # the kernel artifacts and evidence metadata the run did produce -- but never
@@ -286,12 +207,6 @@ do_results() {
 
     echo "==> Publishing small metadata to evidence/"
     publish_metadata
-
-    if [[ -n "${product}" ]]; then
-        verify_product "${product}"
-    else
-        echo "==> No product to verify; skipping NAS read-back verification"
-    fi
 }
 
 case "${MODE}" in

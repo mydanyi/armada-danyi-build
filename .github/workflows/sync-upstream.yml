@@ -1,0 +1,88 @@
+name: Sync Armada upstream
+
+# Daily merge of armada-os/armada main into this personal build repo.
+#
+# Runs only on the schedule below and manual dispatch -- never on push, so the
+# merge it makes cannot re-trigger itself. The personal layer (custom workflows,
+# Chinese/plugin/unmerged patches, build config) is kept as is. It never builds
+# an image, opens a PR or dispatches a workflow: the personal image is still
+# built manually and separately. The push uses a dedicated, repo-scoped write
+# deploy key already provisioned on the runner; this workflow neither reads nor
+# prints the key and adds no GitHub secret.
+on:
+  schedule:
+    # 20:17 UTC == 04:17 Asia/Hong_Kong (next day), i.e. once per day.
+    - cron: '17 20 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Share the single personal-build lock: an in-flight manual build keeps running
+# and this sync waits instead of cancelling it (and vice versa).
+concurrency:
+  group: armada-personal-build
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync upstream main
+    runs-on: [self-hosted, Linux, X64, armada-personal, docker]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Sync upstream into main
+        id: sync
+        shell: bash
+        run: bash personal-build/sync-upstream.sh "${GITHUB_WORKSPACE}"
+
+      - name: Push synced main
+        id: push
+        if: steps.sync.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${GITHUB_REPOSITORY:?}"
+          : "${ARMADA_EXECUTION_BASE:?ARMADA_EXECUTION_BASE must be set by the runner}"
+          [[ "${ARMADA_EXECUTION_BASE}" == /* ]] \
+            || { echo "ERROR: ARMADA_EXECUTION_BASE must be absolute" >&2; exit 2; }
+
+          key="${ARMADA_EXECUTION_BASE}/credentials/upstream-sync-ed25519"
+          known="${ARMADA_EXECUTION_BASE}/credentials/github-sync-known-hosts"
+          [[ -f "${key}" ]] || { echo "ERROR: deploy key not found: ${key}" >&2; exit 1; }
+          [[ -f "${known}" ]] || { echo "ERROR: known_hosts not found: ${known}" >&2; exit 1; }
+
+          # Dedicated write deploy key over SSH on port 443 (github.com host-key
+          # alias). Never GITHUB_TOKEN, never --force, key never printed.
+          export GIT_SSH_COMMAND="ssh -i ${key} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${known} -o HostKeyAlias=github.com -p 443"
+          git push "git@ssh.github.com:${GITHUB_REPOSITORY}.git" HEAD:main
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          changed='${{ steps.sync.outputs.changed }}'
+          sha='${{ steps.sync.outputs.new_sha }}'
+          {
+            echo "## Sync Armada upstream"
+            echo
+            if [[ "${changed}" == 'true' ]]; then
+              if [[ '${{ steps.push.outcome }}' == 'success' ]]; then
+                echo "Merged a new upstream commit: \`${sha}\` (pushed to main)."
+              else
+                echo "Merged a new upstream commit: \`${sha}\`; local merge prepared but push failed — main was not updated."
+              fi
+            elif [[ "${changed}" == 'false' ]]; then
+              echo "No new upstream commits; nothing to push."
+            else
+              echo "Sync did not complete (outcome: ${{ steps.sync.outcome }})."
+            fi
+            echo
+            echo "No build was triggered: the personal image is built manually only."
+          } >> "${GITHUB_STEP_SUMMARY}"
