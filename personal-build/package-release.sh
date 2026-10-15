@@ -16,7 +16,7 @@
 #   SRC_ROOT/personal-build/update.sh
 #
 # 产出（全部写在 TASK_ROOT/output/ 之内）:
-#   TASK_ROOT/output/release/armada-<VER>.img.gz.part000 ...
+#   TASK_ROOT/output/release/armada-<VER>.img.gz.7z.001 ...（安装包，由 package-install.sh 生成）
 #   TASK_ROOT/output/release/armada-<VER>.oci.tar.part000 ...
 #   TASK_ROOT/output/release/update.sh
 #   TASK_ROOT/output/release/source.tar.gz        （有 fixture 或是 git checkout 时）
@@ -93,7 +93,39 @@ trap cleanup EXIT
 STAGING=$(mktemp -d "$OUTPUT/.release-staging.XXXXXX")
 info "临时目录: $STAGING"
 
-# ------------------------------------------------------------------ 分卷
+# ------------------------------------------------------ 安装包分卷（7z，经 helper）
+
+# 安装镜像不再按字节 split：交给同目录的 package-install.sh，它把完整的
+# .img.gz 原样（不 gunzip、不产生巨大 raw 副本）封装成多卷
+# armada-<VER>.img.gz.7z.001…，并在自己的输出目录写一份清单（.img.gz 与每个
+# 分卷的 SHA256）。该 helper 需要 gzip（仅校验输入）与 7zz；发布步骤在
+# release-tools 镜像内运行，因此二者都可直接使用。
+INSTALL_HELPER="$(dirname -- "${BASH_SOURCE[0]}")/package-install.sh"
+[ -f "$INSTALL_HELPER" ] || die "缺少安装包 helper: $INSTALL_HELPER"
+
+INSTALL_DIR=$STAGING/install
+info "生成安装包 7z 分卷: $INSTALL_HELPER"
+bash "$INSTALL_HELPER" "$IMG_GZ" "$INSTALL_DIR" "$PART_BYTES"
+
+count_volumes() {               # count_volumes <目录>
+  local n=0 p
+  for p in "$1"/*.7z.[0-9][0-9][0-9]; do
+    if [ -f "$p" ]; then n=$((n + 1)); fi
+  done
+  printf '%s' "$n"
+}
+
+VOLUMES=$(count_volumes "$INSTALL_DIR")
+[ "$VOLUMES" -gt 0 ] || die "helper 未能生成 $IMG_NAME 的 7z 分卷"
+
+# 仅把 helper 产出的 .7z 分卷搬到 STAGING；helper 的清单稍后并入父 SHA256SUMS。
+for v in "$INSTALL_DIR"/*.7z.[0-9][0-9][0-9]; do
+  [ -f "$v" ] || continue
+  mv -- "$v" "$STAGING/"
+done
+info "安装包 7z 分卷 ${VOLUMES} 个"
+
+# ------------------------------------------------------------------ OCI 分卷
 
 count_parts() {                 # count_parts <前缀>
   local n=0 p
@@ -103,16 +135,12 @@ count_parts() {                 # count_parts <前缀>
   printf '%s' "$n"
 }
 
-info "分卷 $IMG_NAME"
-split -b "$PART_BYTES" -d -a 3 "$IMG_GZ" "$STAGING/$IMG_NAME.part"
 info "分卷 $OCI_NAME"
 split -b "$PART_BYTES" -d -a 3 "$OCI_TAR" "$STAGING/$OCI_NAME.part"
 
-IMG_PARTS=$(count_parts "$STAGING/$IMG_NAME.part")
 OCI_PARTS=$(count_parts "$STAGING/$OCI_NAME.part")
-[ "$IMG_PARTS" -gt 0 ] || die "未能生成 $IMG_NAME 的分卷"
 [ "$OCI_PARTS" -gt 0 ] || die "未能生成 $OCI_NAME 的分卷"
-info "镜像分卷 ${IMG_PARTS} 个，OCI 分卷 ${OCI_PARTS} 个"
+info "OCI 分卷 ${OCI_PARTS} 个"
 
 # ------------------------------------------------------------------ SHA256SUMS
 
@@ -126,19 +154,26 @@ record() {
   printf '%s  %s\n' "$digest" "$2" >> "$SUMS"
 }
 
-# 2 个完整输入（按 basename 记录）
-record "$IMG_GZ"  "$IMG_NAME"
+# 完整输入：OCI 整包。安装包的 .img.gz 由 helper 清单提供（见下），此处不再重复
+# 记录，避免对同一份 .img.gz 重复哈希、重复条目。
 record "$OCI_TAR" "$OCI_NAME"
 
-# 全部分卷
-for p in "$STAGING/$IMG_NAME.part"[0-9][0-9][0-9]; do
-  [ -f "$p" ] || continue
-  record "$p" "$(basename "$p")"
-done
+# OCI 分卷（安装包分卷由 helper 清单提供，见下）
 for p in "$STAGING/$OCI_NAME.part"[0-9][0-9][0-9]; do
   [ -f "$p" ] || continue
   record "$p" "$(basename "$p")"
 done
+
+# 并入 helper 清单：完整 .img.gz 与全部 .img.gz.7z 分卷的 SHA256 已由 helper 算好，
+# 直接追加，避免对同一份镜像与同一批分卷重复哈希；清单中不含 raw.img。
+# 分卷 basename 已与 STAGING 一致。
+[ -f "$INSTALL_DIR/SHA256SUMS" ] || die "helper 未生成清单: $INSTALL_DIR/SHA256SUMS"
+cat -- "$INSTALL_DIR/SHA256SUMS" >> "$SUMS"
+
+# 仅清理 helper 自己留下的清单与（搬空后的）子目录，不触碰其它文件。
+rm -f -- "$INSTALL_DIR/SHA256SUMS"
+rmdir -- "$INSTALL_DIR" 2>/dev/null \
+  || die "helper 输出目录存在未预期的残留: $INSTALL_DIR"
 
 # update.sh
 info "复制 update.sh"
@@ -147,7 +182,7 @@ chmod 755 "$STAGING/update.sh"
 record "$STAGING/update.sh" "update.sh"
 
 # 源码归档：优先使用测试 fixture，其次从 git checkout 生成，都没有则跳过
-ARCHIVE_FIXTURE=$SRC_ROOT/source.tar.gz
+ARCHIVE_FIXTURE=${ARMADA_SOURCE_ARCHIVE:-$SRC_ROOT/source.tar.gz}
 if [ -f "$ARCHIVE_FIXTURE" ]; then
   info "复制源码 fixture: $ARCHIVE_FIXTURE"
   cp -- "$ARCHIVE_FIXTURE" "$STAGING/source.tar.gz"

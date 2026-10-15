@@ -53,9 +53,11 @@ OUT="$TASK/output"
 
 mkdir -p "$OUT" "$SRC/personal-build" "$FAKEBIN"
 
-# Two small inputs with the names package-release.sh expects, plus the update.sh
-# it copies into the release.
-head -c 40 /dev/zero | tr '\0' A > "$OUT/armada-$VERSION.img.gz"
+# Two inputs with the names package-release.sh expects, plus the update.sh it
+# copies into the release. The installer input is a genuine gzip stream (of a
+# small raw image) so package-release.sh can decompress it before hashing.
+head -c 64 /dev/urandom > "$WORK/raw.img"
+gzip -c -- "$WORK/raw.img" > "$OUT/armada-$VERSION.img.gz"
 head -c 20 /dev/zero | tr '\0' B > "$OUT/armada-$VERSION.oci.tar"
 printf '#!/usr/bin/env bash\necho fixture-update\n' > "$SRC/personal-build/update.sh"
 

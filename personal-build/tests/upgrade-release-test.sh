@@ -8,13 +8,22 @@
 #   personal-build/package-release.sh TASK_ROOT SRC_ROOT
 #       OUTPUT defaults to TASK_ROOT/output.
 #       Inputs already present in $OUTPUT:
-#           armada-<VERSION>.img.gz
-#           armada-<VERSION>.oci.tar      (VERSION from $ARMADA_VERSION)
+#           armada-<VERSION>.img.gz       (VERSION from $ARMADA_VERSION)
+#           armada-<VERSION>.oci.tar
 #       Output into $OUTPUT/release/:
-#           - every big input split into <full-name>.part000, .part001, ...
-#             with $ARMADA_RELEASE_PART_BYTES bytes per volume (default 1900MiB;
-#             the test overrides it to force several volumes)
-#           - a SHA256SUMS listing the complete packages AND every volume
+#           - the complete armada-<VERSION>.img.gz stored as-is (never
+#             decompressed) inside multi-volume 7z archives
+#             armada-<VERSION>.img.gz.7z.001, .7z.002, ... with at most
+#             $ARMADA_RELEASE_PART_BYTES bytes per volume (default 1900MiB; the
+#             test overrides it to force several volumes). The first volume
+#             alone must recover the .img.gz byte-for-byte because 7zz
+#             auto-reads the remaining volumes, no raw armada-<VERSION>.img is
+#             ever produced, and no <full-name>.img.gz.part byte splits remain.
+#           - the OCI archive byte-split into armada-<VERSION>.oci.tar.part000,
+#             .part001, ... with $ARMADA_RELEASE_PART_BYTES bytes per volume
+#           - a SHA256SUMS listing the complete img.gz, the complete oci.tar and
+#             every 7z and OCI volume, with no raw armada-<VERSION>.img entry
+#             and no duplicate filename entries
 #           - a copy of update.sh and of the source.tar.gz source archive
 #             (the source archive is optional when its fixture is absent; this
 #             test does create the fixture and therefore expects the copy)
@@ -84,12 +93,14 @@ mk_blob() {  # mk_blob <path> <size> [char]
 VERSION="20261015.abcd1234"
 IMG_NAME="armada-$VERSION.img.gz"
 OCI_NAME="armada-$VERSION.oci.tar"
+IMGBASE="armada-$VERSION.img"     # raw image: must never be produced by the build
+ARCBASE="$IMG_NAME.7z"            # base name of the split 7z volumes (.7z.001, ...)
 
 # ============================================================================
-# Group 1 -- package-release.sh: split, reassemble, checksums, archive, abort
+# Group 1 -- package-release.sh: 7z-split, reassemble, checksums, archive, abort
 # ============================================================================
 run_package() {  # run_package <task_root> <src_root>
-    ( cd -- "$WORK" && ARMADA_VERSION="$VERSION" ARMADA_RELEASE_PART_BYTES=16 \
+    ( cd -- "$WORK" && ARMADA_VERSION="$VERSION" ARMADA_RELEASE_PART_BYTES=65536 \
         bash "$PACKAGE_RELEASE" "$1" "$2" )
 }
 
@@ -97,8 +108,12 @@ PTASK="$WORK/pkg-ok-task"
 PSRC="$WORK/pkg-ok-src"
 POUT="$PTASK/output"
 mkdir -p "$POUT" "$PSRC/personal-build"
-mk_blob "$POUT/$IMG_NAME" 40 A
-mk_blob "$POUT/$OCI_NAME" 20 B
+# The installer input is a real gzip of a random raw image. Random bytes are
+# incompressible, so the .img.gz spans several 7z volumes.
+REF_IMG="$WORK/ref.img"
+head -c 196608 /dev/urandom > "$REF_IMG"      # ~192KiB raw reference image
+gzip -c -- "$REF_IMG" > "$POUT/$IMG_NAME"
+mk_blob "$POUT/$OCI_NAME" 81920 B             # 80KiB OCI archive, byte-split
 printf '#!/usr/bin/env bash\necho fixture-update\n' > "$PSRC/personal-build/update.sh"
 mk_blob "$PSRC/source.tar.gz" 12 S
 img_before="$(sha "$POUT/$IMG_NAME")"
@@ -109,30 +124,69 @@ run_package "$PTASK" "$PSRC" >"$WORK/pkg-ok.out" 2>&1 \
 REL="$POUT/release"
 [[ -d "$REL" ]] || fail "package-release did not create $REL"
 
-# 40-byte input / 16-byte volumes -> part000..part002 (16,16,8);
-# 20-byte input / 16-byte volumes -> part000..part001 (16,4).
-[[ "$(stat -c %s "$REL/$IMG_NAME.part000")" == 16 ]] || fail "img part000 size"
-[[ "$(stat -c %s "$REL/$IMG_NAME.part001")" == 16 ]] || fail "img part001 size"
-[[ "$(stat -c %s "$REL/$IMG_NAME.part002")" == 8  ]] || fail "img part002 size"
-[[ ! -e "$REL/$IMG_NAME.part003" ]] || fail "img split produced an extra volume"
-[[ "$(stat -c %s "$REL/$OCI_NAME.part000")" == 16 ]] || fail "oci part000 size"
-[[ "$(stat -c %s "$REL/$OCI_NAME.part001")" == 4  ]] || fail "oci part001 size"
+command -v 7zz >/dev/null || fail "7zz is required for the installer-volume checks"
+
+shopt -s nullglob
+
+# The .img.gz must no longer ship as raw byte splits.
+img_parts=( "$REL/$IMG_NAME".part* )
+(( ${#img_parts[@]} == 0 )) || fail "release still contains byte-split .img.gz.part volumes"
+
+# ~192KiB .img.gz / 65536-byte volumes -> several volumes, each at most PART_BYTES.
+vols=( "$REL/$ARCBASE".[0-9]* )
+(( ${#vols[@]} >= 2 )) || fail "expected at least two 7z volumes, found ${#vols[@]}"
+[[ "${vols[0]}" == "$REL/$ARCBASE.001" ]] || fail "first 7z volume is not .7z.001: ${vols[0]}"
+for v in "${vols[@]}"; do
+    sz="$(stat -c %s "$v")"
+    (( sz > 0 )) || fail "empty 7z volume: $v"
+    (( sz <= 65536 )) || fail "7z volume exceeds PART_BYTES: $v ($sz)"
+done
+
+# The first volume alone must recover the exact .img.gz byte-for-byte.
+7zz x -so "${vols[0]}" > "$WORK/img.gz.extracted" 2>/dev/null \
+    || fail "7zz could not extract the first installer volume"
+cmp -s "$WORK/img.gz.extracted" "$POUT/$IMG_NAME" \
+    || fail "7z volumes do not recover the original .img.gz byte-for-byte"
+
+# 7zz l: the archive holds only the basename .img.gz, never a raw .img.
+arc_entries="$(7zz l -slt -- "${vols[0]}" | awk '/^----------/{seen=1; next} seen && /^Path = /{sub(/^Path = /, ""); print}')"
+arc_count="$(printf '%s\n' "$arc_entries" | grep -c . || true)"
+(( arc_count == 1 )) || fail "7z archive must hold exactly one entry, found $arc_count"
+[[ "$arc_entries" == "$IMG_NAME" ]] || fail "7z archive entry must be $IMG_NAME, found: $arc_entries"
+
+# The OCI archive is still a raw byte split (80KiB -> part000 65536 + part001 16384).
+oci_parts=( "$REL/$OCI_NAME".part* )
+(( ${#oci_parts[@]} == 2 )) || fail "expected two OCI part volumes, found ${#oci_parts[@]}"
+[[ "$(stat -c %s "$REL/$OCI_NAME.part000")" == 65536 ]] || fail "oci part000 size"
+[[ "$(stat -c %s "$REL/$OCI_NAME.part001")" == 16384 ]] || fail "oci part001 size"
 [[ ! -e "$REL/$OCI_NAME.part002" ]] || fail "oci split produced an extra volume"
 
-# Volumes reassemble byte-for-byte and the originals stay untouched.
-cat "$REL/$IMG_NAME".part* > "$WORK/img.reasm"
+# OCI volumes reassemble byte-for-byte and the originals stay untouched.
 cat "$REL/$OCI_NAME".part* > "$WORK/oci.reasm"
-cmp -s "$WORK/img.reasm" "$POUT/$IMG_NAME" || fail "img volumes do not reassemble"
 cmp -s "$WORK/oci.reasm" "$POUT/$OCI_NAME" || fail "oci volumes do not reassemble"
 [[ "$(sha "$POUT/$IMG_NAME")" == "$img_before" ]] || fail "package-release modified $IMG_NAME"
 [[ "$(sha "$POUT/$OCI_NAME")" == "$oci_before" ]] || fail "package-release modified $OCI_NAME"
 
-# SHA256SUMS: complete-package hashes match the originals; volume lines verify.
+# SHA256SUMS: complete img.gz + oci.tar and every 7z/OCI volume, with no raw
+# image entry and no duplicate filename entries.
 SUMS="$REL/SHA256SUMS"
 [[ -f "$SUMS" ]] || fail "release is missing SHA256SUMS"
-grep -Eq "^$img_before[[:space:]]+$IMG_NAME\$" "$SUMS" || fail "SHA256SUMS lacks the full img hash"
+grep -Eq "^$img_before[[:space:]]+$IMG_NAME\$" "$SUMS" || fail "SHA256SUMS lacks the full img.gz hash"
 grep -Eq "^$oci_before[[:space:]]+$OCI_NAME\$" "$SUMS" || fail "SHA256SUMS lacks the full oci hash"
-grep -E '\.part[0-9]+$' "$SUMS" > "$WORK/parts.sums"
+IMGBASE_RE="${IMGBASE//./\\.}"
+! grep -Eq "([[:space:]]|\*)$IMGBASE_RE\$" "$SUMS" || fail "SHA256SUMS must not list a raw image entry"
+mapfile -t sums_names < <(awk '{ n=$NF; sub(/^\*/, "", n); print n }' "$SUMS")
+if (( ${#sums_names[@]} > 0 )); then
+    dupes="$(printf '%s\n' "${sums_names[@]}" | sort | uniq -d)"
+    [[ -z "$dupes" ]] || fail "SHA256SUMS has duplicate filename entries: $dupes"
+fi
+grep -E '\.7z\.[0-9]+$' "$SUMS" > "$WORK/7z.sums"
+[[ "$(wc -l < "$WORK/7z.sums")" -eq "${#vols[@]}" ]] \
+    || fail "SHA256SUMS does not list every 7z volume"
+grep -E '\.part[0-9]+$' "$SUMS" > "$WORK/oci.sums"
+[[ "$(wc -l < "$WORK/oci.sums")" -eq "${#oci_parts[@]}" ]] \
+    || fail "SHA256SUMS does not list every OCI volume"
+cat "$WORK/7z.sums" "$WORK/oci.sums" > "$WORK/parts.sums"
 [[ -s "$WORK/parts.sums" ]] || fail "SHA256SUMS lists no volumes"
 ( cd "$REL" && sha256sum --check --status "$WORK/parts.sums" ) \
     || fail "SHA256SUMS volume entries do not verify"
@@ -142,7 +196,7 @@ cmp -s "$REL/update.sh" "$PSRC/personal-build/update.sh" || fail "release lacks 
 if [[ -f "$PSRC/source.tar.gz" ]]; then
     cmp -s "$REL/source.tar.gz" "$PSRC/source.tar.gz" || fail "release lacks source.tar.gz"
 fi
-pass 'package-release: volumes, reassembly, SHA256SUMS and archive are correct'
+pass 'package-release: 7z volumes, OCI split, SHA256SUMS and archive are correct'
 
 # A failed packaging run must not publish a release.
 FTASK="$WORK/pkg-fail-task"

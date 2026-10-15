@@ -146,12 +146,26 @@ jobs:
         # installed-device upgrade path consumes.
         run: bash personal-build/build-oci.sh "${TASK_ROOT}" "${SRC_ROOT}"
 
+      - name: Prepare release-tools image
+        shell: bash
+        # Builds the local release/test tool image (7-Zip 26.04 + gzip) that the
+        # release tests and the packaging step both run inside. Nothing is pushed
+        # to a registry: the tag only ever lives on this runner's Docker daemon.
+        run: |
+          set -euo pipefail
+          docker build \
+            --platform linux/amd64 \
+            -t local/armada-personal-release-tools:7zip26.04 \
+            -f "${SRC_ROOT}/personal-build/release-tools.Dockerfile" \
+            "${SRC_ROOT}"
+
       - name: Run release tests
         shell: bash
-        # The offline release tests run in the same local tool image as the OCI
-        # step, with no network: the source is mounted read-only at /src, the
-        # tests' scratch space is this task's work/tests mounted at /test-work,
-        # and TMPDIR points there so no fixture lands outside the task.
+        # The offline release tests run in the local release-tools image (the
+        # same image the packaging step uses), with no network: the source is
+        # mounted read-only at /src, the tests' scratch space is this task's
+        # work/tests mounted at /test-work, and TMPDIR points there so no fixture
+        # lands outside the task.
         run: |
           set -euo pipefail
           mkdir -p "${TASK_ROOT}/work/tests"
@@ -161,19 +175,41 @@ jobs:
             -v "${SRC_ROOT}:/src:ro" \
             -v "${TASK_ROOT}/work/tests:/test-work" \
             --entrypoint /bin/bash \
-            local/armada-personal-disk-builder:checked \
+            local/armada-personal-release-tools:7zip26.04 \
             -c '
               set -euo pipefail
               bash /src/personal-build/tests/upgrade-release-test.sh
               bash /src/personal-build/tests/personal-update-target-test.sh
               bash /src/personal-build/tests/package-hash-failure-test.sh
+              bash /src/personal-build/tests/install-7z-test.sh
             '
 
       - name: Package release artifacts
         shell: bash
-        # Splits the install image and the OCI archive, writes SHA256SUMS and
-        # stages everything under TASK_ROOT/output/release/ for upload.
-        run: bash personal-build/package-release.sh "${TASK_ROOT}" "${SRC_ROOT}"
+        # Runs inside the release-tools image with no network: it drives
+        # package-install.sh to build the 7z install volumes, splits the OCI
+        # archive, writes SHA256SUMS and stages everything under
+        # TASK_ROOT/output/release/ for upload. TASK_ROOT is bind-mounted
+        # read-write (staging/output) and SRC_ROOT read-only (update.sh and the
+        # package scripts) at the very same absolute paths the runner uses, so
+        # the build server's daemon mounts them unchanged. The release-tools
+        # image has no git, so the source archive is created here on the runner
+        # (which has git) as TASK_ROOT/work/release-source.tar.gz and handed to
+        # the container as a fixture via ARMADA_SOURCE_ARCHIVE. ARMADA_VERSION is
+        # handed through to the script.
+        run: |
+          set -euo pipefail
+          git -C "${SRC_ROOT}" archive HEAD | gzip -1 > "${TASK_ROOT}/work/release-source.tar.gz"
+          docker run --rm --network none \
+            --platform linux/amd64 \
+            --cpus 8 --memory 8g \
+            -e ARMADA_VERSION \
+            -e ARMADA_SOURCE_ARCHIVE="${TASK_ROOT}/work/release-source.tar.gz" \
+            -v "${TASK_ROOT}:${TASK_ROOT}:rw" \
+            -v "${SRC_ROOT}:${SRC_ROOT}:ro" \
+            --entrypoint bash \
+            local/armada-personal-release-tools:7zip26.04 \
+            "${SRC_ROOT}/personal-build/package-release.sh" "${TASK_ROOT}" "${SRC_ROOT}"
 
       - name: Publish results to NAS
         if: always()

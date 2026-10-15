@@ -18,7 +18,9 @@
 
 ## 使用方式
 
-- 首次安装：下载安装包分卷，按原名重组为完整镜像后刷机，详见
+- 首次安装：下载全部 `armada-<版本>.img.gz.7z.001…` 分卷并放在同一目录，用 7-Zip 等
+  支持 7z 分卷的工具打开第一个 `.001`，自动解出完整 `.img.gz`；用 Etcher 等工具直接
+  选择该 `.img.gz` 刷机即可（无需再解压成 `.img`），详见
   [`USAGE.md`](https://github.com/mydanyi/armada-danyi-build/blob/main/personal-build/USAGE.md)。
 - 已安装用户：下载 `update.sh` 后运行 `sudo bash update.sh`，或直接执行
   `sudo armada-danyi-update`；校验通过后由用户手动重启完成升级。已经安装官方
@@ -27,5 +29,7 @@
 
 ## 说明
 
+- 本次仅调整安装包分发格式：`.img.gz` 原样封装为多卷 7z（不再解压成巨大 raw 镜像）；
+  镜像内容不变。
 - 本个人版不会经由 Steam 官方渠道被覆盖。
 - 组合后的新镜像尚未在真机验收；本次说明不代表所有游戏均已修复。

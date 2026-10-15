@@ -5,43 +5,47 @@
 个人版**不使用 Steam/官方渠道覆盖**：系统升级通过本仓库的 OCI 升级包完成，不会
 跟随官方 Beta 通道被替换。
 
-每个 Release 同时提供两类产物，并用分卷（`.partNNN`）分发，以避免单个整包
-过大。
+每个 Release 同时提供两类产物，并以分卷分发（安装包为 `.img.gz.7z.NNN`，OCI 升级包为
+`.partNNN`），以避免单个整包过大。
 
 ## 一、安装包分卷与 OCI 升级分卷的区别
 
 | 用途 | 完整包 | 分卷命名 | 使用者 |
 | --- | --- | --- | --- |
-| 首次安装（刷机） | `armada-<版本>.img.gz` | `armada-<版本>.img.gz.part000…` | 尚未安装的新设备 |
+| 首次安装（刷机） | `armada-<版本>.img.gz`（由 7z 分卷解出） | `armada-<版本>.img.gz.7z.001…` | 尚未安装的新设备 |
 | 已装机升级（OTA） | `armada-<版本>.oci.tar` | `armada-<版本>.oci.tar.part000…` | 已安装本个人版的设备 |
 
-- **安装包分卷**：把完整刷机镜像 `armada-<版本>.img.gz` 切成若干 `.partNNN`。
-  分卷只用于传输，按原文件名重组后得到的仍是刷机用的完整 `.img.gz`。
+- **安装包分卷**：刷机镜像 `armada-<版本>.img.gz` 原样封装为多卷 7z，命名为
+  `armada-<版本>.img.gz.7z.001`、`.002`……。请把**全部分卷放在同一目录**，用 7-Zip
+  等支持 7z 分卷的工具打开**第一个** `.img.gz.7z.001`，工具会自动读取其余分卷并解出
+  完整的 `.img.gz` 刷机镜像。
 - **OCI 升级分卷**：把完整升级包 `armada-<版本>.oci.tar` 切成若干 `.partNNN`。
   升级脚本会按编号顺序下载、逐个校验，再合并回完整 OCI 后交给系统。
+- 当前版本规模：安装包分卷解出约 7.14 GiB 的 `.img.gz`、OCI 约 6.95 GiB，
+  二者各约 4 个分卷。
 
-> 分卷（`.partNNN`）只在 GitHub Release 上分发；完整的 `.img.gz` 与 `.oci.tar`
-> 及小型校验元数据另行留存副本，因此同一个整包不会被重复传输。
+> 分卷（安装包 `.img.gz.7z.NNN` 与 OCI `.partNNN`）只在 GitHub Release 上分发；
+> 完整 `.img.gz`、`.oci.tar` 及小型校验元数据另行留存副本，因此同一个整包不会被
+> 重复传输。
 
 ## 二、完整性校验（SHA256SUMS）
 
-每个 Release 都带有一份 `SHA256SUMS`，其中同时列出**完整包**与**每一个分卷**的
-SHA256。请在使用前校验，升级脚本也会自动逐卷校验。
+每个 Release 都带有一份 `SHA256SUMS`，其中列出**完整 `.img.gz`/`.oci.tar`** 与
+**每一个分卷**的 SHA256。清单中**不含**未压缩的 `raw.img`——安装包分卷解出的就是
+`.img.gz` 本身。请在使用前校验，升级脚本也会自动逐卷校验。
 
 ## 三、首次安装（刷机）
 
-1. 从 [Releases](https://github.com/mydanyi/armada-danyi-build/releases) 下载全部
-   `armada-<版本>.img.gz.partNNN` 分卷。
-2. 按文件名顺序重组为原始完整包（保持原名）：
-
-   ```bash
-   cat armada-<版本>.img.gz.part* > armada-<版本>.img.gz
-   ```
-
-3. 使用重组后的完整 `.img.gz`，按**官方安装文档**刷机：
+1. 从 [Releases](https://github.com/mydanyi/armada-danyi-build/releases) 下载**全部**
+   `armada-<版本>.img.gz.7z.001`、`.002`…… 分卷，并放在**同一个目录**下。
+2. 用 7-Zip（或其他支持 7z 分卷的工具）打开**第一个** `armada-<版本>.img.gz.7z.001`，
+   工具会自动读取同目录下的其余分卷，解出完整的 `.img.gz` 刷机镜像。
+3. 直接用 [Etcher](https://etcher.balena.io/) 等工具选择解出的 `.img.gz` 刷机即可，
+   **无需**再解压成 `.img`；也可按**官方安装文档**刷机：
    <https://armadaos.dev/getting-started/flashing-to-an-sd-card/>
 
-请勿直接刷分卷文件；务必先重组回完整 `.img.gz`。
+请勿只下载部分分卷，也请勿单独使用 `.001` 之外的分卷；务必让工具从 `.001` 开始
+自动解出完整 `.img.gz` 后再刷机。
 
 ## 四、已安装用户升级（一条命令）
 

@@ -194,8 +194,9 @@ do_results() {
     # Always publish whatever the task's output/ holds -- on failure this keeps
     # the kernel artifacts and evidence metadata the run did produce -- but never
     # the raw disk image: disk.raw and any *.raw are useless when the run failed
-    # and the logs already describe them. Release split volumes (*.part*) are also
-    # skipped: the NAS keeps the complete .img.gz and .oci.tar plus the small
+    # and the logs already describe them. Release split volumes are also skipped
+    # -- both the OCI byte parts (*.part*) and the install 7z volumes
+    # (*.7z.NNN): the NAS keeps the complete .img.gz and .oci.tar plus the small
     # metadata, while the volumes exist only for the GitHub Release, so the same
     # package is not uploaded to the NAS a second time.
     if [[ -d "${TASK_ROOT}/output" ]]; then
@@ -204,6 +205,7 @@ do_results() {
             --exclude='/image/disk.raw' \
             --exclude='*.raw' \
             --exclude='/release/*.part*' \
+            --exclude='/release/*.7z.[0-9][0-9][0-9]' \
             "${TASK_ROOT}/output/" "${NAS_USERHOST}:${REMOTE_RUN}/output/"
     else
         echo "==> No ${TASK_ROOT}/output directory to publish"
