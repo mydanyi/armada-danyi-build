@@ -75,6 +75,22 @@ sudo armada-danyi-update
 **只有校验通过才阶段化**到系统（`bootc switch --transport oci-archive`）。任何
 下载失败、缺卷或哈希不符都会中止，且不会改动系统。
 
+### 升级过程与电源保护
+
+- 升级脚本在真正开始下载前，通过 `systemd-inhibit --what=idle:sleep --mode=block`
+  申请系统电源抑制锁（`idle:sleep` 阻塞锁由 KDE PowerDevil 等识别），整个
+  **下载 / 逐卷校验 / 合并 / 部署**流程都在锁保护下进行，避免升级途中设备休眠或空闲。
+- 锁只在脚本运行时持有：流程正常结束、失败或用户中断（Ctrl-C / 终止）都会自动释放，
+  **不会修改你的任何电源设置**，也不会安装后台服务或常驻进程。
+- 本次实现的是系统级 `idle:sleep` 锁；**Steam 游戏模式下的实际屏幕保持仍需在真实图形
+  会话中复测验收**，本说明不代表已验证。
+
+> **关于旧镜像内置的 `armada-danyi-update`**：它随镜像内置，**不会**因为只更新 Release
+> 附件而自动改变。因此即便你已经下载了本仓库最新的 Release，设备上原有的
+> `armada-danyi-update` 仍是旧版本。要获得本电源保护修复，请**重新下载本仓库最新的
+> `update.sh`** 并以 `sudo bash update.sh` 运行；未来新构建的镜像才会内置新版
+> `armada-danyi-update`。
+
 ## 五、重启与回滚
 
 - 阶段化完成后**不会自动重启**，请自行**手动重启**以应用升级。

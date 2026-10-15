@@ -169,7 +169,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${TASK_ROOT}/work/tests"
-          docker run --rm --network none \
+          docker run --rm --init --network none \
             --platform linux/amd64 \
             -e TMPDIR=/test-work \
             -v "${SRC_ROOT}:/src:ro" \
@@ -179,6 +179,7 @@ jobs:
             -c '
               set -euo pipefail
               bash /src/personal-build/tests/upgrade-release-test.sh
+              bash /src/personal-build/tests/update-inhibit-test.sh
               bash /src/personal-build/tests/personal-update-target-test.sh
               bash /src/personal-build/tests/package-hash-failure-test.sh
               bash /src/personal-build/tests/install-7z-test.sh

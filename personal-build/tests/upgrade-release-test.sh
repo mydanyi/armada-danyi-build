@@ -287,6 +287,33 @@ exec /bin/uname "$@"
 UNAME
 chmod +x "$FAKEBIN/uname"
 
+# Minimal systemd-inhibit mock: this container has no system bus, so it parses and
+# skips --what/--mode/--who/--why and then runs the wrapped command, returning its
+# exit code. It stands in for the CLI only; the lock contract itself is covered by
+# tests/update-inhibit-test.sh.
+cat > "$FAKEBIN/systemd-inhibit" <<'INHIBIT'
+#!/usr/bin/env bash
+args=("$@")
+i=0
+n=${#args[@]}
+while (( i < n )); do
+    a="${args[$i]}"
+    case "$a" in
+        --what=*|--mode=*|--who=*|--why=*) : ;;
+        --what|--mode|--who|--why) ((i+=1)) ;;
+        --list|--version|--help|-h) exit 0 ;;
+        --) ((i+=1)); break ;;
+        -*) : ;;
+        *) break ;;
+    esac
+    ((i+=1))
+done
+cmd=("${args[@]:i}")
+(( ${#cmd[@]} )) || exit 0
+exec "${cmd[@]}"
+INHIBIT
+chmod +x "$FAKEBIN/systemd-inhibit"
+
 # Record any forbidden reboot path (the script must never call these).
 for c in reboot systemctl; do
     cat > "$FAKEBIN/$c" <<EOF
