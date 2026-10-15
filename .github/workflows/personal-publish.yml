@@ -148,10 +148,9 @@ jobs:
 
       - name: Create draft release
         id: release
-        # Uploads every already-built release asset. It stays a draft, and the
-        # step fails on any missing asset, so an incomplete upload is never made
-        # visible. An existing draft for the same tag is reused and its small
-        # assets are overwritten by this complete set.
+        # Creates (or reuses) the draft metadata only. It stays a draft and the
+        # assets are uploaded sequentially by the next step, so an incomplete
+        # upload is never made visible.
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: v${{ env.ARMADA_VERSION }}
@@ -159,8 +158,16 @@ jobs:
           target_commitish: ${{ env.BUILT_SHA }}
           draft: true
           body_path: personal-build/RELEASE-NOTES.md
-          fail_on_unmatched_files: true
-          files: ${{ env.TASK_ROOT }}/output/release/*
+
+      - name: Upload release assets
+        # Streams the assets one at a time; concurrency is what exhausted runner
+        # memory and made the API close the connection mid-upload. The uploader
+        # itself refuses a non-draft release before mutating anything.
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: bash personal-build/upload-release.sh "${TASK_ROOT}" "${RELEASE_ID}"
 
       - name: Publish the release
         # Flip the freshly created draft to a public, latest release only after

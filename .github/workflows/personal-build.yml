@@ -224,8 +224,10 @@ jobs:
       - name: Create draft release
         id: release
         # Only a fully successful build that was explicitly asked to publish a
-        # Release reaches this step; the Release stays a draft until the PATCH
-        # below, so an incomplete attachment is never exposed publicly.
+        # Release reaches this step. It creates the draft metadata only; the
+        # assets are uploaded sequentially by the next step. The Release stays a
+        # draft until the PATCH below, so an incomplete attachment is never
+        # exposed publicly.
         if: ${{ success() && github.event.inputs.publish_release == 'true' }}
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
@@ -234,8 +236,16 @@ jobs:
           target_commitish: ${{ github.sha }}
           draft: true
           body_path: personal-build/RELEASE-NOTES.md
-          fail_on_unmatched_files: true
-          files: ${{ env.TASK_ROOT }}/output/release/*
+
+      - name: Upload release assets
+        # Streams the assets one at a time; concurrency is what exhausted runner
+        # memory and made the API close the connection mid-upload.
+        if: ${{ success() && github.event.inputs.publish_release == 'true' }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: bash personal-build/upload-release.sh "${TASK_ROOT}" "${RELEASE_ID}"
 
       - name: Publish the release
         # Flip the freshly created draft to a public, latest release only after
