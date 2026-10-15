@@ -5,11 +5,11 @@
 #   upload-release.sh TASK_ROOT RELEASE_ID
 #
 # Uploads TASK_ROOT/output/release/* (all regular, non-empty files) to the
-# draft Release RELEASE_ID, one file at a time. Concurrency grows runner memory
-# and makes the API close the connection mid-transfer ("other side closed"), so
-# files are streamed strictly sequentially and each file may retry up to three
-# times after removing its own partial previous asset. The Release is required
-# to be a draft first: a public Release is refused before any mutation.
+# draft Release RELEASE_ID, strictly sequentially, one file at a time. An
+# exact-name asset that already matches RELEASE_DIR/SHA256SUMS is skipped;
+# otherwise the previous asset is removed and the file is re-uploaded, retrying
+# up to five times. The Release must be a draft first: a public Release is
+# refused before any mutation.
 #
 # Required environment:
 #   GITHUB_TOKEN        token with contents:write (never printed, no set -x)
@@ -62,10 +62,32 @@ curl -fsS --http1.1 \
 jq -e '.draft == true' "${DRAFT_JSON}" >/dev/null \
   || die "release ${RELEASE_ID} is not a draft; refusing to upload"
 
+# ----------------------------------------------- expected digests
+
+expected_sha256() {  # expected_sha256 <file> -> lowercase 64-hex sha256, else nothing
+  local file="$1" name manifest
+  name="$(basename -- "${file}")"
+  if [[ "${name}" == "SHA256SUMS" ]]; then
+    # The manifest has no entry for itself; hash this small file directly.
+    sha256sum -- "${file}" 2>/dev/null | awk '{print $1}'
+    return
+  fi
+  manifest="${RELEASE_DIR}/SHA256SUMS"
+  [[ -f "${manifest}" ]] || return 1
+  awk -v n="${name}" '
+    $1 ~ /^[0-9a-fA-F]{64}$/ {
+      f = $2; sub(/^\*/, "", f)
+      if (f == n) { print tolower($1); found = 1; exit }
+    }
+    END { if (!found) exit 1 }
+  ' "${manifest}"
+}
+
 # ----------------------------------------------- one sequential attempt
 
 upload_attempt() {  # upload_attempt <file> -> 0 ok, 1 retryable failure
   local file="$1" name size assets asset_id encoded resp
+  local expected gh_state gh_size gh_digest
   name="$(basename -- "${file}")"
   size="$(stat -c '%s' -- "${file}")"
 
@@ -80,6 +102,24 @@ upload_attempt() {  # upload_attempt <file> -> 0 ok, 1 retryable failure
     || return 1
   asset_id="$(jq -r --arg n "${name}" 'map(select(.name == $n)) | .[0].id // empty' "${assets}")" \
     || return 1
+  gh_state="$(jq -r --arg n "${name}" 'map(select(.name == $n)) | .[0].state // empty' "${assets}")" \
+    || return 1
+  gh_size="$(jq -r --arg n "${name}" 'map(select(.name == $n)) | .[0].size // empty' "${assets}")" \
+    || return 1
+  gh_digest="$(jq -r --arg n "${name}" 'map(select(.name == $n)) | .[0].digest // empty' "${assets}")" \
+    || return 1
+  expected="$(expected_sha256 "${file}" || true)"
+  [[ "${expected}" =~ ^[0-9a-f]{64}$ ]] \
+    || die "no valid SHA256 for ${name} in ${RELEASE_DIR}/SHA256SUMS"
+
+  # Resume: an exact-name asset whose state, size and content digest already
+  # match the local file is complete and must not be re-uploaded.
+  if [[ -n "${asset_id}" && "${gh_state}" == "uploaded" \
+        && "${gh_size}" == "${size}" && "${gh_digest}" == "sha256:${expected}" ]]; then
+    info "already uploaded ${name} (${size} bytes, checksum matches)"
+    return 0
+  fi
+
   if [[ -n "${asset_id}" ]]; then
     info "removing previous asset ${name} (id ${asset_id})"
     curl -fsS --http1.1 -X DELETE \
@@ -105,8 +145,8 @@ upload_attempt() {  # upload_attempt <file> -> 0 ok, 1 retryable failure
     "${UPLOADS}?name=${encoded}" -o "${resp}" \
     || return 1
 
-  jq -e --arg n "${name}" --argjson s "${size}" \
-    '(.name == $n) and (.size == $s) and (.state == "uploaded")' "${resp}" >/dev/null \
+  jq -e --arg n "${name}" --argjson s "${size}" --arg d "sha256:${expected}" \
+    '(.name == $n) and (.size == $s) and (.state == "uploaded") and (.digest == $d)' "${resp}" >/dev/null \
     || return 1
 
   info "uploaded ${name} (${size} bytes, state uploaded)"
@@ -121,7 +161,7 @@ for file in "${ASSETS[@]}"; do
     if upload_attempt "${file}"; then
       break
     fi
-    if (( attempt >= 3 )); then
+    if (( attempt >= 5 )); then
       die "failed to upload $(basename -- "${file}") after ${attempt} attempts"
     fi
     info "attempt ${attempt} failed for $(basename -- "${file}"); retry in 5s"
