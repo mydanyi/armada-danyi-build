@@ -1,0 +1,182 @@
+name: Armada Danyi publish already built artifacts
+
+# Manual publication of complete artifacts from an earlier build: it only
+# uploads them, so an interrupted upload can be retried without rebuilding images.
+
+# Manual-only: there is deliberately no push, schedule or pull_request trigger.
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: Build id to publish, e.g. 38658301044-1 (<run id>-<attempt>)
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+# Same group as the personal build: this recovery run queues behind any
+# in-flight build and never cancels it (cancel-in-progress false), so a complete
+# image is never aborted half-way and two uploads never race.
+concurrency:
+  group: armada-personal-build
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish already built Armada artifacts
+    runs-on: [self-hosted, Linux, X64, armada-personal, docker]
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # No credentials are left in the checkout; this run only needs the
+          # working tree for RELEASE-NOTES.md.
+          persist-credentials: false
+
+      - name: Prepare and validate built artifacts
+        shell: bash
+        env:
+          # The build id comes only from the manual dispatch input.
+          BUILT_RUN_ID: ${{ github.event.inputs.build_id }}
+        run: |
+          set -euo pipefail
+
+          : "${BUILT_RUN_ID:?build_id input is required}"
+          [[ "${BUILT_RUN_ID}" =~ ^[0-9]+-[0-9]+$ ]] \
+            || { echo "ERROR: build_id must match <run_id>-<attempt>: '${BUILT_RUN_ID}'" >&2; exit 2; }
+
+          : "${ARMADA_EXECUTION_BASE:?ARMADA_EXECUTION_BASE must be set by the runner}"
+          [[ "${ARMADA_EXECUTION_BASE}" == /* ]] \
+            || { echo "ERROR: ARMADA_EXECUTION_BASE must be absolute: ${ARMADA_EXECUTION_BASE}" >&2; exit 2; }
+
+          TASK_ROOT="${ARMADA_EXECUTION_BASE}/runs/${BUILT_RUN_ID}"
+          RELEASE_DIR="${TASK_ROOT}/output/release"
+
+          # Metadata written by the original build. It is parsed, never sourced,
+          # so no value from the file can ever be executed.
+          META="${TASK_ROOT}/work/build-source.txt"
+          [ -f "${META}" ] \
+            || { echo "ERROR: build metadata not found: ${META}" >&2; exit 2; }
+
+          BUILT_SHA="$(sed -n 's/^GITHUB_SHA=//p' "${META}" | head -n1)"
+          ARMADA_VERSION="$(sed -n 's/^ARMADA_VERSION=//p' "${META}" | head -n1)"
+          META_BUILD_ID="$(sed -n 's/^BUILD_ID=//p' "${META}" | head -n1)"
+
+          [[ "${BUILT_SHA}" =~ ^[0-9a-f]{40}$ ]] \
+            || { echo "ERROR: GITHUB_SHA in metadata is not a 40-char hex commit" >&2; exit 2; }
+          [[ "${ARMADA_VERSION}" =~ ^[A-Za-z0-9._-]+$ ]] \
+            || { echo "ERROR: ARMADA_VERSION has unsafe characters" >&2; exit 2; }
+          [[ "${META_BUILD_ID}" == "${BUILT_RUN_ID}" ]] \
+            || { echo "ERROR: metadata BUILD_ID '${META_BUILD_ID}' does not match requested '${BUILT_RUN_ID}'" >&2; exit 2; }
+
+          # Require the release directory and its mandatory assets to be present
+          # and non-empty before anything is uploaded.
+          [ -d "${RELEASE_DIR}" ] \
+            || { echo "ERROR: release directory not found: ${RELEASE_DIR}" >&2; exit 3; }
+          [ -s "${RELEASE_DIR}/SHA256SUMS" ] \
+            || { echo "ERROR: release SHA256SUMS missing or empty" >&2; exit 3; }
+          [ -s "${RELEASE_DIR}/update.sh" ] \
+            || { echo "ERROR: release update.sh missing or empty" >&2; exit 3; }
+          [ -s "${RELEASE_DIR}/source.tar.gz" ] \
+            || { echo "ERROR: release source.tar.gz missing or empty" >&2; exit 3; }
+
+          # Every asset the manifest lists inside release/ must exist and be
+          # non-empty. The manifest also records the two full packages
+          # (armada-<VER>.img.gz / armada-<VER>.oci.tar) which intentionally live
+          # outside release/; those two entries are skipped, and no full-image
+          # hash is recomputed here.
+          while read -r _digest name; do
+            [ -n "${name:-}" ] || continue
+            case "${name}" in
+              *.img.gz|*.oci.tar) continue ;;
+            esac
+            [ -s "${RELEASE_DIR}/${name}" ] \
+              || { echo "ERROR: release asset missing or empty: ${name}" >&2; exit 3; }
+          done < "${RELEASE_DIR}/SHA256SUMS"
+
+          {
+            echo "TASK_ROOT=${TASK_ROOT}"
+            echo "ARMADA_VERSION=${ARMADA_VERSION}"
+            echo "BUILT_SHA=${BUILT_SHA}"
+          } >> "${GITHUB_ENV}"
+
+          echo "BUILD_ID=${BUILT_RUN_ID}"
+          echo "ARMADA_VERSION=${ARMADA_VERSION}"
+          echo "BUILT_SHA=${BUILT_SHA}"
+
+      - name: Refuse to upload over a public release
+        # softprops/action-gh-release v3 preserves an existing draft for the same
+        # tag, so this retry uploader must only ever run against a draft (or a
+        # tag with no release at all). If the tag is already a public release,
+        # refuse before a single asset is uploaded. The token is passed only via
+        # the environment and never printed (`set -x` is deliberately not used).
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${GITHUB_TOKEN:?GITHUB_TOKEN missing}"
+
+          STATE="${TASK_ROOT}/work/publish-release-state.json"
+          : "${STATE:?publish state path missing}"
+          mkdir -p "${TASK_ROOT}/work"
+
+          # curl without -f so the status code is captured instead of aborting;
+          # a genuine network/transport failure still aborts under set -e.
+          http_code="$(curl -sS -o "${STATE}" -w '%{http_code}' \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/v${ARMADA_VERSION}")"
+
+          case "${http_code}" in
+            200)
+              jq -e '.draft == true' "${STATE}" >/dev/null \
+                || { echo "ERROR: release v${ARMADA_VERSION} already exists and is public; refusing to upload over it" >&2; exit 4; }
+              echo "Existing release v${ARMADA_VERSION} is a draft; retry upload may proceed."
+              ;;
+            404)
+              echo "No existing release for v${ARMADA_VERSION}; a new draft will be created."
+              ;;
+            *)
+              echo "ERROR: unexpected HTTP ${http_code} querying release v${ARMADA_VERSION}" >&2
+              exit 4
+              ;;
+          esac
+
+      - name: Create draft release
+        id: release
+        # Uploads every already-built release asset. It stays a draft, and the
+        # step fails on any missing asset, so an incomplete upload is never made
+        # visible. An existing draft for the same tag is reused and its small
+        # assets are overwritten by this complete set.
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          tag_name: v${{ env.ARMADA_VERSION }}
+          name: Armada Danyi ${{ env.ARMADA_VERSION }}
+          target_commitish: ${{ env.BUILT_SHA }}
+          draft: true
+          body_path: personal-build/RELEASE-NOTES.md
+          fail_on_unmatched_files: true
+          files: ${{ env.TASK_ROOT }}/output/release/*
+
+      - name: Publish the release
+        # Flip the freshly created draft to a public, latest release only after
+        # every asset uploaded successfully. The token comes solely from the
+        # environment and is never printed (`set -x` is deliberately not used).
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: |
+          set -euo pipefail
+          : "${GITHUB_TOKEN:?GITHUB_TOKEN missing}"
+          : "${RELEASE_ID:?release id missing}"
+          curl -fsSL -X PATCH \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -d '{"draft":false,"make_latest":"true"}'
