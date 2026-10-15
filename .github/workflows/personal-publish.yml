@@ -146,6 +146,50 @@ jobs:
               ;;
           esac
 
+      - name: Verify the existing release tag points at the built commit
+        # GitHub refuses a workflow-token update of a release whose
+        # target_commitish is a commit that predates workflow-file changes on the
+        # default branch: that write needs workflows:write, which GITHUB_TOKEN
+        # cannot request. The tag for this build must therefore already exist on
+        # the remote and point exactly at the original build commit. This step
+        # only proves that; it never creates or moves a tag.
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${GITHUB_TOKEN:?GITHUB_TOKEN missing}"
+
+          STATE="${TASK_ROOT}/work/publish-tag-state.json"
+          : "${STATE:?publish tag state path missing}"
+          mkdir -p "${TASK_ROOT}/work"
+
+          # curl without -f so the status code is captured instead of aborting;
+          # a genuine network/transport failure still aborts under set -e.
+          http_code="$(curl -sS -o "${STATE}" -w '%{http_code}' \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/tags/v${ARMADA_VERSION}")"
+
+          case "${http_code}" in
+            200)
+              jq -e --arg sha "${BUILT_SHA}" \
+                '.object.type == "commit" and .object.sha == $sha' \
+                "${STATE}" >/dev/null \
+                || { echo "ERROR: tag v${ARMADA_VERSION} is not a lightweight tag at ${BUILT_SHA}; the original build's exact tag must exist before publication (this run never creates or moves tags)" >&2; exit 5; }
+              echo "Tag v${ARMADA_VERSION} is a lightweight tag at ${BUILT_SHA}."
+              ;;
+            404)
+              echo "ERROR: tag v${ARMADA_VERSION} does not exist; the original build's exact tag at ${BUILT_SHA} must be created before publication (this run never creates or moves tags)" >&2
+              exit 5
+              ;;
+            *)
+              echo "ERROR: unexpected HTTP ${http_code} querying tag v${ARMADA_VERSION}" >&2
+              exit 5
+              ;;
+          esac
+
       - name: Create draft release
         id: release
         # Creates (or reuses) the draft metadata only. It stays a draft and the
@@ -155,7 +199,12 @@ jobs:
         with:
           tag_name: v${{ env.ARMADA_VERSION }}
           name: Armada Danyi ${{ env.ARMADA_VERSION }}
-          target_commitish: ${{ env.BUILT_SHA }}
+          # GitHub ignores target_commitish for an existing Git tag (docs) and
+          # refuses a workflow-token update targeting an old build SHA once
+          # workflow files changed on default main (workflows:write is required
+          # and GITHUB_TOKEN cannot request it). The verified existing tag stays
+          # at BUILT_SHA; this value is API metadata only.
+          target_commitish: ${{ github.sha }}
           draft: true
           body_path: personal-build/RELEASE-NOTES.md
 
@@ -186,4 +235,4 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
-            -d '{"draft":false,"make_latest":"true"}'
+            -d "{\"tag_name\":\"v${ARMADA_VERSION}\",\"draft\":false,\"make_latest\":\"true\"}"
