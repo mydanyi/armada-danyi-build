@@ -263,12 +263,12 @@ done
 ostree fsck --repo="${ROOT}/ostree/repo"
 
 # The BIB image records the local build reference (a localhost image that no
-# flashed device can pull). This is a personal build: its OTA path is the
-# external armada-danyi-update helper, which imports an OCI image from a GitHub
-# Release. The deployment is deliberately NOT repointed at the official Beta
-# channel -- doing so would let a later official update replace this customised
-# system layer. The Linux/Steam built-in official update entry point is disabled
-# for that reason; rebooting after an import is left to the user.
+# flashed device can pull). This is a personal build: its OTA path is the 单翼版
+# (danyi) update channel, which imports an OCI image from a GitHub Release (the
+# armada-danyi-update helper performs the import). The deployment is
+# deliberately NOT repointed at the official Beta channel -- doing so would let a
+# later official update replace this customised system layer without an explicit
+# channel choice.
 [ -f "${ORIGIN}" ] || { echo "ERROR: deployment origin missing: ${ORIGIN}" >&2; exit 1; }
 original_ref="$(sed -n 's/^container-image-reference=//p' "${ORIGIN}")"
 [ -n "${original_ref}" ] \
@@ -281,13 +281,12 @@ Original container-image-reference (recorded by the local build):
   ${original_ref}
 
 This is a personal build and is NOT repointed at the official Beta channel:
-doing so would let a later official update replace this customised system layer.
-Updates are instead applied with the external armada-danyi-update helper, which
-imports an OCI image from a GitHub Release. The built-in official update entry
-point (Linux/Steam) is therefore disabled for this build, and rebooting after an
-import is left to the user. Both the install and upgrade artifacts are
-published to a GitHub Release while the NAS copy is kept as well; nothing is
-pushed to a container registry.
+doing so would let a later official update replace this customised system
+layer. Updates are instead applied through the 单翼版 (danyi) channel, which
+imports an OCI image from a GitHub Release (the armada-danyi-update helper
+performs the import). Both the install and upgrade artifacts are published to a
+GitHub Release while the NAS copy is kept as well; nothing is pushed to a
+container registry.
 EOF
 
 # Checking or repairing needs the partitions unmounted: unmount, then check each

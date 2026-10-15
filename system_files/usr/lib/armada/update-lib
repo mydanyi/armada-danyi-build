@@ -4,7 +4,11 @@
 ARMADA_CANONICAL_REGISTRY="ghcr.io/armada-os/armada"
 ARMADA_LEGACY_REGISTRY="ghcr.io/virtudude/armada"
 ARMADA_CHANNEL_STATE="/var/lib/armada/update-channel"
-ARMADA_CHANNELS="stable beta testing"
+ARMADA_PERSONAL_CHANNEL_STATE="/var/lib/armada/personal-update-channel"
+ARMADA_CHANNELS="stable beta testing danyi"
+ARMADA_PERSONAL_MARKER="/usr/share/armada/personal-build/plugins.lock.json"
+ARMADA_PERSONAL_TARGET_REPO="github.com/mydanyi/armada-danyi-build"
+ARMADA_PERSONAL_TARGET_CHANNEL="danyi"
 ARMADA_OSTREE_REPO="/ostree/repo"
 ARMADA_UPDATE_RESERVE_GIB=2
 ARMADA_UPDATE_RESERVE_SIZE="${ARMADA_UPDATE_RESERVE_GIB}GB"
@@ -15,12 +19,26 @@ armada_update_log() {
     logger -t armada-update -- "$*" 2>/dev/null || true
 }
 
+# The channel-state file the current image reads and writes. A personal-build
+# marker redirects it to the personal (单翼版) state, so upgrading a personal
+# image never mistakes the legacy official state for a fresh "switch back to
+# official" choice. Evaluated per call -- the official constant is never
+# repointed -- so the two states stay independent files.
+armada_channel_state_path() {
+    if [[ -e "$ARMADA_PERSONAL_MARKER" ]]; then
+        printf '%s\n' "$ARMADA_PERSONAL_CHANNEL_STATE"
+    else
+        printf '%s\n' "$ARMADA_CHANNEL_STATE"
+    fi
+}
+
 # Steam's picker speaks Valve's branch tokens; translate to/from our ghcr tags.
 armada_token_to_channel() {
     case "$1" in
         rel|latest|stable) echo stable ;;
         beta)               echo beta ;;
         rc|bc|main|preview|testing) echo testing ;;
+        danyi|单翼版) echo danyi ;;
         *) return 1 ;;
     esac
 }
@@ -28,6 +46,7 @@ armada_channel_to_token() {
     case "$1" in
         beta)    echo beta ;;
         testing) echo preview ;;
+        danyi)   echo 单翼版 ;;
         *)       echo rel ;;
     esac
 }
@@ -242,25 +261,60 @@ armada_update_fits() {
 }
 
 # Channel the user selected, validated to a known channel; else $1 (a caller-
-# supplied booted channel, to avoid re-querying) or the booted channel.
+# supplied booted channel, to avoid re-querying) or the booted channel. A
+# personal-build marker makes 单翼版 (danyi) the default, but a recorded official
+# selection above always wins so an explicit switch back survives. Only the
+# current image's own state file is consulted, so a stale official state on a
+# personal image is ignored.
 armada_desired_channel() {
-    local c="" ch
-    [[ -r "$ARMADA_CHANNEL_STATE" ]] && read -r c < "$ARMADA_CHANNEL_STATE" 2>/dev/null
+    local c="" ch state
+    state="$(armada_channel_state_path)"
+    [[ -r "$state" ]] && read -r c < "$state" 2>/dev/null
     # Exact-match a known channel (a substring/glob test would accept a corrupt
     # multi-word value and feed it to bootc as a tag).
     for ch in ${ARMADA_CHANNELS}; do
         [[ "$c" == "$ch" ]] && { echo "$c"; return; }
     done
+    if [[ -e "$ARMADA_PERSONAL_MARKER" ]]; then
+        printf '%s\n' "$ARMADA_PERSONAL_TARGET_CHANNEL"
+        return
+    fi
     if [[ -n "${1:-}" ]]; then echo "$1"; else armada_booted_channel; fi
 }
 
 armada_update_target() {
-    local ref="$1" booted repository desired
+    local ref="$1" booted repository desired ch c recorded="" state
+    # A recorded known channel -- read from the image's own state file (personal
+    # on a personal image, official otherwise) -- is authoritative, so an
+    # explicit choice survives.
+    state="$(armada_channel_state_path)"
+    if [[ -r "$state" ]]; then
+        read -r c < "$state" 2>/dev/null
+        for ch in ${ARMADA_CHANNELS}; do
+            [[ "$c" == "$ch" ]] && { recorded="$c"; break; }
+        done
+    fi
     # Personal build: updates come from armada-danyi-update (an OCI import from
-    # a GitHub Release), never from the official channels. A personal-build
-    # marker on disk means the official path must not overwrite this system.
-    if [[ -e /usr/share/armada/personal-build/plugins.lock.json ]]; then
-        return 1
+    # a GitHub Release), never from the official channels. Only an explicit
+    # official selection routes back to ghcr; a metadata failure or a local
+    # booted ref must never silently fall back to the official path.
+    if [[ -e "$ARMADA_PERSONAL_MARKER" ]]; then
+        case "$recorded" in
+            stable|beta|testing)
+                printf '%s %s\n' "$ARMADA_CANONICAL_REGISTRY" "$recorded"
+                return 0
+                ;;
+            *)
+                printf '%s %s\n' "$ARMADA_PERSONAL_TARGET_REPO" "$ARMADA_PERSONAL_TARGET_CHANNEL"
+                return 0
+                ;;
+        esac
+    fi
+    # No personal marker: an explicit danyi selection in the official state
+    # still means the personal GitHub target -- never a bogus ghcr ":danyi" tag.
+    if [[ "$recorded" == "$ARMADA_PERSONAL_TARGET_CHANNEL" ]]; then
+        printf '%s %s\n' "$ARMADA_PERSONAL_TARGET_REPO" "$ARMADA_PERSONAL_TARGET_CHANNEL"
+        return 0
     fi
     booted="$(armada_tag_from_ref "$ref")"
     if repository="$(armada_repository_from_ref "$ref")"; then

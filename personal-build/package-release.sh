@@ -13,11 +13,14 @@
 # 输入（必须存在）:
 #   TASK_ROOT/output/armada-<VER>.img.gz
 #   TASK_ROOT/output/armada-<VER>.oci.tar
+#   TASK_ROOT/output/oci-image-info.json   （build-oci.sh 的 skopeo inspect JSON；
+#                                           先校验再原样复制，失败不产出 release/）
 #   SRC_ROOT/personal-build/update.sh
 #
 # 产出（全部写在 TASK_ROOT/output/ 之内）:
 #   TASK_ROOT/output/release/armada-<VER>.img.gz.7z.001 ...（安装包，由 package-install.sh 生成）
 #   TASK_ROOT/output/release/armada-<VER>.oci.tar.part000 ...
+#   TASK_ROOT/output/release/oci-image-info.json  （原样复制）
 #   TASK_ROOT/output/release/update.sh
 #   TASK_ROOT/output/release/source.tar.gz        （有 fixture 或是 git checkout 时）
 #   TASK_ROOT/output/release/SHA256SUMS
@@ -53,7 +56,7 @@ PART_BYTES=$((10#$PART_BYTES))
 [ "$PART_BYTES" -le "$DEFAULT_PART_BYTES" ] \
   || die "ARMADA_RELEASE_PART_BYTES 不能大于默认值 $DEFAULT_PART_BYTES"
 
-for c in split sha256sum mktemp; do
+for c in split sha256sum mktemp jq; do
   command -v "$c" >/dev/null 2>&1 || die "缺少依赖命令: $c"
 done
 
@@ -62,19 +65,48 @@ done
 OUTPUT=$TASK_ROOT/output
 IMG_GZ=$OUTPUT/armada-$ARMADA_VERSION.img.gz
 OCI_TAR=$OUTPUT/armada-$ARMADA_VERSION.oci.tar
+INFO_JSON=$OUTPUT/oci-image-info.json
 SOURCE_UPDATE=$SRC_ROOT/personal-build/update.sh
 RELEASE_DIR=$OUTPUT/release
 
 IMG_NAME=$(basename "$IMG_GZ")
 OCI_NAME=$(basename "$OCI_TAR")
+INFO_NAME=$(basename "$INFO_JSON")
 
 [ -d "$OUTPUT" ]        || die "输出目录不存在: $OUTPUT"
 [ -f "$IMG_GZ" ]        || die "缺少输入文件: $IMG_GZ"
 [ -f "$OCI_TAR" ]       || die "缺少输入文件: $OCI_TAR"
+[ -f "$INFO_JSON" ]     || die "缺少输入文件: $INFO_JSON"
 [ -f "$SOURCE_UPDATE" ] || die "缺少升级脚本: $SOURCE_UPDATE"
 if [ -e "$RELEASE_DIR" ] || [ -L "$RELEASE_DIR" ]; then
   die "发布目录已存在，拒绝覆盖: $RELEASE_DIR"
 fi
+
+# ------------------------------------------------------ oci-image-info.json 校验
+# 该文件由 build-oci.sh 用 `skopeo inspect` 生成。发布前必须先把它校验干净，让
+# 缺字段/错架构/错版本在昂贵的 7z 分卷之前失败，绝不产出 release/。
+jq -e 'type == "object"' "$INFO_JSON" >/dev/null 2>&1 \
+  || die "oci-image-info.json 必须是合法 JSON 对象: $INFO_JSON"
+
+info_arch=$(jq -r '.Architecture // ""' "$INFO_JSON")
+[ "$info_arch" = "arm64" ] \
+  || die "oci-image-info.json Architecture 必须为 arm64（实际: '$info_arch'）"
+
+info_os=$(jq -r '.Os // ""' "$INFO_JSON")
+[ "$info_os" = "linux" ] \
+  || die "oci-image-info.json Os 必须为 linux（实际: '$info_os'）"
+
+info_digest=$(jq -r '.Digest // ""' "$INFO_JSON")
+[[ "$info_digest" =~ ^sha256:[0-9a-f]{64}$ ]] \
+  || die "oci-image-info.json Digest 必须是 sha256: 加 64 位小写十六进制（实际: '$info_digest'）"
+
+info_bootc=$(jq -r '.Labels["containers.bootc"] // ""' "$INFO_JSON")
+[ "$info_bootc" = "1" ] \
+  || die "oci-image-info.json Labels.containers.bootc 必须为 \"1\"（实际: '$info_bootc'）"
+
+info_version=$(jq -r '.Labels["org.opencontainers.image.version"] // ""' "$INFO_JSON")
+[ "$info_version" = "$ARMADA_VERSION" ] \
+  || die "oci-image-info.json 版本 '$info_version' 与 ARMADA_VERSION '$ARMADA_VERSION' 不一致"
 
 info "版本: $ARMADA_VERSION"
 info "分卷大小: $PART_BYTES 字节"
@@ -180,6 +212,11 @@ info "复制 update.sh"
 cp -- "$SOURCE_UPDATE" "$STAGING/update.sh"
 chmod 755 "$STAGING/update.sh"
 record "$STAGING/update.sh" "update.sh"
+
+# oci-image-info.json：前面已校验，这里原样复制（不改写、不重新生成）并计入清单
+info "复制 $INFO_NAME"
+cp -- "$INFO_JSON" "$STAGING/$INFO_NAME"
+record "$STAGING/$INFO_NAME" "$INFO_NAME"
 
 # 源码归档：优先使用测试 fixture，其次从 git checkout 生成，都没有则跳过
 ARCHIVE_FIXTURE=${ARMADA_SOURCE_ARCHIVE:-$SRC_ROOT/source.tar.gz}

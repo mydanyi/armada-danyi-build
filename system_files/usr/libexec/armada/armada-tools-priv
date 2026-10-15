@@ -44,7 +44,7 @@ def request(arguments):
         return armada_os.execute("update")
     if action == "restart-os":
         return armada_os.restart()
-    if action in {"channel-stable", "channel-beta", "channel-preview"}:
+    if action in {"channel-stable", "channel-beta", "channel-preview", "channel-danyi"}:
         return armada_os.select_channel(action.removeprefix("channel-"))
     if action not in {"get-ssh", "enable-ssh", "disable-ssh"}:
         raise ValueError("Unsupported Armada Tools request")

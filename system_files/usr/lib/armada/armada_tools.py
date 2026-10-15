@@ -193,7 +193,7 @@ def main(arguments=None):
     actions["steam"].add_parser("status", help="show the installed client version")
     actions["update"].add_parser("status", help="show OS versions and channel")
     channel = actions["update"].add_parser("channel", help="choose the channel used by subsequent OS updates")
-    channel.add_argument("channel", choices=("stable", "beta", "preview"))
+    channel.add_argument("channel", choices=("stable", "beta", "preview", "danyi"))
     for obj, action, description in (
             ("steam", "repair", "repair Steam by reinstalling the factory client from the booted OS image; use Desktop Mode, including when running over SSH"),
             ("update", "install", "install an OS update using the selected channel"),

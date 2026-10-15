@@ -98,6 +98,8 @@ except SystemExit as error:
             request.assert_called_with("enable-ssh")
             self.assertEqual(self.invoke("update", "channel", "preview"), 0)
             request.assert_called_with("channel-preview")
+            self.assertEqual(self.invoke("update", "channel", "danyi"), 0)
+            request.assert_called_with("channel-danyi")
 
     def test_removed_steam_commands_are_rejected(self):
         for command in (("restore",), ("games", "list"), ("games", "uninstall", "100", "--yes")):

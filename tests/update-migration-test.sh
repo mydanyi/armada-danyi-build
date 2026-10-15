@@ -89,8 +89,6 @@ assert_target "local.armadaos.dev/armada" feature-a beta \
     "ostree-unverified-registry:docker://local.armadaos.dev/armada:feature-a"
 assert_target "$ARMADA_CANONICAL_REGISTRY" beta beta \
     "ostree-image-signed:docker://${ARMADA_CANONICAL_REGISTRY}@sha256:deadbeef"
-assert_target "$ARMADA_CANONICAL_REGISTRY" beta beta \
-    "containers-storage:localhost/armada:latest"
 assert_target "example.invalid/${ARMADA_LEGACY_REGISTRY}" stable beta \
     "ostree-image-signed:docker://example.invalid/${ARMADA_LEGACY_REGISTRY}:stable"
 
@@ -111,6 +109,8 @@ assert_no_target beta \
     "ostree-unverified-registry:docker://local.armadaos.dev/armada@sha256:deadbeef"
 assert_no_target testing \
     "ostree-image-signed:docker://example.invalid/${ARMADA_LEGACY_REGISTRY}@sha256:deadbeef"
+# 本地镜像不能隐式回退到官方
+assert_no_target beta "containers-storage:localhost/armada:latest"
 (
     armada_booted_channel() { :; }
     assert_no_target - \

@@ -48,6 +48,11 @@ class ToolsTests(unittest.TestCase):
             bridge.request(["channel-preview"])
             channel.assert_called_once_with("preview")
 
+    def test_helper_routes_personal_channel_danyi(self):
+        with patch.object(bridge.armada_os, "select_channel") as channel:
+            bridge.request(["channel-danyi"])
+            channel.assert_called_once_with("danyi")
+
     def test_os_operation_output_is_text_and_waits_for_completion(self):
         def execute(*args):
             print("70%")

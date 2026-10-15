@@ -1,9 +1,13 @@
 import json
+from pathlib import Path
 import subprocess
 
 UPDATE = "/usr/libexec/armada/armada-update"
 SELECT = "/usr/libexec/armada/armada-select-branch"
 CHANNELS = ("stable", "beta", "preview")
+PERSONAL_CHANNEL = "danyi"
+PERSONAL_MARKER = "/usr/share/armada/personal-build/plugins.lock.json"
+PERSONAL_REPOSITORY = "github.com/mydanyi/armada-danyi-build"
 REPOSITORIES = ("ghcr.io/armada-os/armada", "ghcr.io/virtudude/armada")
 
 
@@ -38,10 +42,19 @@ def snapshot():
     repository, channel = target if len(target) == 2 else ("", "")
     if channel == "testing":
         channel = "preview"
+    if repository == PERSONAL_REPOSITORY or Path(PERSONAL_MARKER).exists():
+        # A personal image always offers 单翼版 plus the official channels, so a
+        # personal image that has explicitly selected an official channel can
+        # still pick 单翼版 back before an update is applied.
+        channels = [PERSONAL_CHANNEL, *CHANNELS]
+    elif repository in REPOSITORIES and channel in CHANNELS:
+        channels = list(CHANNELS)
+    else:
+        channels = []
     state = {"booted": booted, "rollback": deployment(status.get("rollback")),
              "staged": deployment(status.get("staged")), "rollback_queued": bool(status.get("rollbackQueued")),
              "channel": channel, "repository": repository,
-             "channels": list(CHANNELS) if repository in REPOSITORIES and channel in CHANNELS else []}
+             "channels": channels}
     return state
 
 
@@ -52,7 +65,7 @@ def status():
 
 
 def select_channel(channel):
-    if channel not in CHANNELS:
+    if channel not in CHANNELS and channel != PERSONAL_CHANNEL:
         raise ValueError("Unknown update channel")
     if channel not in snapshot()["channels"]:
         raise RuntimeError("Channel selection is unavailable for this image")

@@ -16,13 +16,28 @@ fail() {
     exit 7
 }
 
+booted_ref=$(armada_booted_ref)
+target=$(armada_update_target "$booted_ref") || fail "Could not determine the update target"
+read -r repository desired <<<"$target"
+
+# Personal build: dispatch to the personal updater before any official network
+# or storage check. Steam's protocol is preserved by mapping a personal failure
+# to exit 7; check/apply stdout pass through unchanged (a version, then N%).
+if [ "${repository}" = "${ARMADA_PERSONAL_TARGET_REPO}" ]; then
+    personal_updater=/usr/bin/armada-danyi-update
+    [ -x "${personal_updater}" ] || fail "personal updater is unavailable"
+    if [ "${check}" = 1 ]; then
+        "${personal_updater}" --check || exit 7
+    else
+        "${personal_updater}" --steam || exit 7
+    fi
+    exit 0
+fi
+
 command -v bootc >/dev/null || fail "bootc is unavailable"
 reserve_bytes=$(armada_update_reserve_bytes) || fail "Could not determine the update storage reserve"
 
-booted_ref=$(armada_booted_ref)
 booted=$(armada_tag_from_ref "$booted_ref")
-target=$(armada_update_target "$booted_ref") || fail "Could not determine the update target"
-read -r repository desired <<<"$target"
 case "$booted_ref" in ostree-image-signed:*) verified=1 ;; *) verified=0 ;; esac
 
 # Steam suppresses previously applied versions, so successful checks must print a per-build identity.

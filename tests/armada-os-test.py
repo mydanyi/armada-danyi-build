@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -147,6 +148,65 @@ class OperationTests(unittest.TestCase):
         self.run.side_effect = lambda *args, **kwargs: None
         with self.assertRaisesRegex(RuntimeError, "not selected"):
             self.perform("rollback")
+
+
+class SnapshotChannelTests(unittest.TestCase):
+    """snapshot() must resolve a real update target without mocking snapshot.
+
+    Only the external command boundary is faked -- bootc status and the
+    update-lib target query return canned values -- while the personal-marker
+    path is redirected into a temporary directory and its existence is checked
+    by the shipped snapshot() code (Path(PERSONAL_MARKER).exists()).
+    """
+
+    def setUp(self):
+        self.addCleanup(patch.stopall)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.marker = Path(temporary.name) / "plugins.lock.json"
+        patch.object(maintenance, "PERSONAL_MARKER", str(self.marker)).start()
+        self.repository = ""
+        self.channel = ""
+        self.selected = None
+        patch.object(maintenance, "command", side_effect=self.fake_command).start()
+
+    def fake_command(self, arguments, **kwargs):
+        if arguments[0] == "/usr/bin/bootc":
+            return json.dumps({"status": {
+                "booted": {"image": {"version": "current",
+                                     "image": {"image": "ghcr.io/armada-os/armada:stable"}},
+                           "ostree": {"checksum": "a" * 64, "deploySerial": 0, "stateroot": "default"}},
+                "rollback": None, "staged": None, "rollbackQueued": False}})
+        if arguments[0] == "/bin/bash":
+            return f"{self.repository} {self.channel}\n"
+        self.selected = arguments[1]
+        return ""
+
+    def test_personal_repository_offers_danyi_and_official_channels(self):
+        self.repository = maintenance.PERSONAL_REPOSITORY
+        self.channel = "danyi"
+        state = maintenance.snapshot()
+        self.assertEqual(state["channels"], ["danyi", "stable", "beta", "preview"])
+
+    def test_personal_marker_keeps_danyi_when_an_official_channel_is_selected(self):
+        self.marker.write_text("{}\n")
+        self.repository = "ghcr.io/armada-os/armada"
+        self.channel = "preview"
+        state = maintenance.snapshot()
+        self.assertEqual(state["channel"], "preview")
+        self.assertEqual(state["channels"], ["danyi", "stable", "beta", "preview"])
+
+    def test_official_image_without_a_marker_keeps_official_channels(self):
+        self.repository = "ghcr.io/armada-os/armada"
+        self.channel = "preview"
+        state = maintenance.snapshot()
+        self.assertEqual(state["channels"], ["stable", "beta", "preview"])
+
+    def test_select_channel_accepts_danyi_on_a_personal_image(self):
+        self.repository = maintenance.PERSONAL_REPOSITORY
+        self.channel = "danyi"
+        self.assertEqual(maintenance.select_channel("danyi"), {"ok": True})
+        self.assertEqual(self.selected, "danyi")
 
 
 if __name__ == "__main__":

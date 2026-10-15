@@ -11,6 +11,16 @@ from gi.repository import Adw, Gio, GLib, Gtk, Pango
 import armada_tools as backend
 
 
+# The personal channel is shown by its name (单翼版) so the user never has to
+# infer it from the internal "Danyi" label; every other channel keeps its
+# existing title-cased label.
+CHANNEL_LABELS = {"danyi": "单翼版"}
+
+
+def channel_label(channel):
+    return CHANNEL_LABELS.get(channel, channel.title())
+
+
 class OperationDialog(Adw.Window):
     def __init__(self, parent, title, on_restart=None):
         super().__init__(transient_for=parent, modal=True, title=title,
@@ -152,7 +162,7 @@ class UpdatesGroup(Adw.PreferencesGroup):
         self.channel.set_use_subtitle(not self.channels)
         if self.channels:
             self.channel.set_subtitle("")
-        self.channel.set_model(Gtk.StringList.new([value.title() for value in self.channels]
+        self.channel.set_model(Gtk.StringList.new([channel_label(value) for value in self.channels]
                                                  or [state["channel"] or "Unavailable"]))
         if state["channel"] in self.channels:
             self.channel.set_selected(self.channels.index(state["channel"]))

@@ -12,8 +12,20 @@ case "${1:-}" in
         armada_channel_to_token "$(armada_desired_channel)"
         ;;
     *)
-        channel=$(armada_token_to_channel "$1") || { echo "usage: steamos-select-branch <-l|-c|rel|beta|main>" >&2; exit 1; }
-        mkdir -p "$(dirname "$ARMADA_CHANNEL_STATE")"
-        printf '%s\n' "$channel" > "$ARMADA_CHANNEL_STATE"
+        channel=$(armada_token_to_channel "$1") || { echo "usage: steamos-select-branch <-l|-c|rel|beta|main|danyi>" >&2; exit 1; }
+        state="$(armada_channel_state_path)"
+        mkdir -p "$(dirname "$state")"
+        printf '%s\n' "$channel" > "$state"
+        # Crossing to an official channel also refreshes the official state file
+        # so both agree once the official image boots. The personal (单翼版)
+        # choice never rewrites the official state.
+        if [[ "$state" != "$ARMADA_CHANNEL_STATE" ]]; then
+            case "$channel" in
+                stable|beta|testing)
+                    mkdir -p "$(dirname "$ARMADA_CHANNEL_STATE")"
+                    printf '%s\n' "$channel" > "$ARMADA_CHANNEL_STATE"
+                    ;;
+            esac
+        fi
         ;;
 esac
