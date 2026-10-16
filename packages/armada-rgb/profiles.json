@@ -61,7 +61,7 @@
       }
     },
     {
-      "models": ["KONKR Pocket FIT Elite"],
+      "models": ["KONKR Pocket FIT", "KONKR Pocket FIT Elite"],
       "backend": {
         "type": "multicolor",
         "targets": ["konkr:rgb:joysticks"]

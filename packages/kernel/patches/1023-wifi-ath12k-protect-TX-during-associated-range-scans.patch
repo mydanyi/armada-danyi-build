@@ -21,7 +21,7 @@ diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/at
  
  #include "mac.h"
  #include "core.h"
-@@ -5357,12 +5358,56 @@
+@@ -5357,11 +5358,55 @@
  	return i;
  }
  
@@ -72,12 +72,11 @@ diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/at
  	struct ath12k_wmi_scan_req_arg *req;
  
  	lockdep_assert_wiphy(ath12k_ar_to_hw(ar)->wiphy);
- 
-+	ath12k_mac_scan_range_tx_resume(ar);
 +
++	ath12k_mac_scan_range_tx_resume(ar);
+ 
  	spin_lock_bh(&ar->data_lock);
  	req = ar->scan.range_req;
- 	ar->scan.range_req = NULL;
 @@ -5394,6 +5439,10 @@
  					arg->num_chan - next,
  					ar->scan.range_split_freq);
@@ -108,16 +107,16 @@ diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/at
  	kfree(part);
  
  	return ret;
-@@ -5573,6 +5632,8 @@
+@@ -5568,6 +5627,8 @@
  
  	lockdep_assert_wiphy(wiphy);
  
 +	ath12k_mac_scan_range_tx_resume(ar);
 +
- 	/* Keep a single overall request timeout across all range batches:
- 	 * the timer is cancelled only for the last batch (or a non-range or
- 	 * aborted scan).
-@@ -6009,10 +6070,14 @@
+ 	arvif = ar->scan.arvif;
+ 
+ 	/* The scan vdev has already been deleted. This can occur when a
+@@ -5994,9 +6055,13 @@
  	max_scan_time = arg->max_scan_time;
  	split_freq = ath12k_mac_scan_split_freq(ar);
  	if (split_freq &&
@@ -127,13 +126,12 @@ diff --git a/drivers/net/wireless/ath/ath12k/mac.c b/drivers/net/wireless/ath/at
 +					 split_freq) < arg->num_chan ||
 +	     arvif->is_up))
  		split_scan = true;
- 
++
 +	if (split_scan && arvif->is_up)
 +		max_scan_time += 2 * arg->min_rest_time * arg->num_chan;
-+
+ 
  	if (split_scan) {
  		spin_lock_bh(&ar->data_lock);
- 		ar->scan.range_req = arg;
 diff --git a/drivers/net/wireless/ath/ath12k/core.c b/drivers/net/wireless/ath/ath12k/core.c
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c
