@@ -1,5 +1,11 @@
 From ROCKNIX (https://github.com/ROCKNIX/abl), GPL-2.0, (c) ROCKNIX contributors.
 
+Personal build note: this image ships Chinese OpenABL 1.0 for SM8550, SM8650 and
+SM8750 only; SM8250 keeps the official ABL 1.1.8. Match the firmware to the
+actual SoC of your device. OpenABL notices are in OpenABL-notices, and the full
+source is installed at /usr/share/doc/OpenABL and published as source.tar.gz in
+the Release.
+
 1. Copy the rocknix_abl folder from the SD card to the root of Android internal storage.
 
 2. Identify the SoC for your device (flashing the wrong ABL can brick the device,

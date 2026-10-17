@@ -41,9 +41,11 @@ install -Dpm 0644 "${abl_releases}" /usr/lib/armada/abl/releases.tsv
 printf 'ARMADA_ABL_VERSION=%s\nARMADA_ABL_AUTO=%s\n' \
     "${ARMADA_ABL_VERSION}" "${ARMADA_ABL_AUTO}" >> "${manifest}"
 for soc in SM8250 SM8550 SM8650 SM8750; do
+    version_key="ARMADA_ABL_VERSION_${soc}"
+    soc_version=${!version_key:-${ARMADA_ABL_VERSION}}
     approved=$(ARMADA_ABL_RELEASES="${abl_releases}" \
-        python3 /usr/lib/armada/abl-version --lookup "${ARMADA_ABL_VERSION}" "${soc}") || {
-        echo "ERROR: missing approved ${ARMADA_ABL_VERSION} ${soc} payload" >&2
+        python3 /usr/lib/armada/abl-version --lookup "${soc_version}" "${soc}") || {
+        echo "ERROR: missing approved ${soc_version} ${soc} payload" >&2
         exit 1
     }
     read -r approved_size approved_hash <<<"${approved}"
@@ -61,14 +63,20 @@ for soc in SM8250 SM8550 SM8650 SM8750; do
     }
     identity=$(ARMADA_ABL_RELEASES=/usr/lib/armada/abl/releases.tsv \
         python3 /usr/lib/armada/abl-version --with-soc "${payload}")
-    [[ ${identity} == "${ARMADA_ABL_VERSION} ${soc}" ]] || {
+    [[ ${identity} == "${soc_version} ${soc}" ]] || {
         echo "ERROR: ${soc} payload catalog identity is ${identity:-unknown}" >&2
         exit 1
     }
+    printf 'ARMADA_ABL_VERSION_%s=%s\n' "${soc}" "${soc_version}" \
+        >> "${manifest}"
     printf 'ARMADA_ABL_SHA256_%s=%s\n' "${soc}" \
         "${actual_hash}" \
         >> "${manifest}"
 done
+
+# Ship the full OpenABL GPL sources and license texts with the system image.
+install -dpm 0755 /usr/share/doc/OpenABL
+cp -a /ctx/abl/openabl/. /usr/share/doc/OpenABL/
 
 chmod 0755 /usr/libexec/armada/*
 chmod 0755 /usr/libexec/os-session-select

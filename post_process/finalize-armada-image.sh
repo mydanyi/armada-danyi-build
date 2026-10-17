@@ -39,9 +39,11 @@ sudo mkdir -p "${WORK}/mnt/rocknix_abl"
 # vfat has no Unix ownership, so `cp -a` would error on chown under set -e.
 sudo cp "${REPO_ROOT}/abl/README" "${WORK}/mnt/rocknix_abl/README"
 for soc in SM8250 SM8550 SM8650 SM8750; do
+    version_key="ARMADA_ABL_VERSION_${soc}"
+    soc_version=${!version_key:-${ARMADA_ABL_VERSION}}
     approved=$(ARMADA_ABL_RELEASES="${ABL_RELEASES}" \
-        python3 "${ABL_CATALOG_TOOL}" --lookup "${ARMADA_ABL_VERSION}" "${soc}") || {
-        echo "ERROR: missing approved ${ARMADA_ABL_VERSION} ${soc} payload" >&2
+        python3 "${ABL_CATALOG_TOOL}" --lookup "${soc_version}" "${soc}") || {
+        echo "ERROR: missing approved ${soc_version} ${soc} payload" >&2
         exit 1
     }
     read -r approved_size approved_hash <<<"${approved}"
@@ -64,6 +66,17 @@ for soc in SM8250 SM8550 SM8650 SM8750; do
             | sudo tee "$d/${s}.sh" >/dev/null
     done
     sudo chmod 0755 "$d"/*.sh
+done
+
+# OpenABL license notices on the ESP. The full GPL source archive stays in the
+# system image (/usr/share/doc/OpenABL) and the Release source package, so the
+# ESP only carries the notices.
+notices="${WORK}/mnt/rocknix_abl/OpenABL-notices"
+sudo mkdir -p "${notices}"
+sudo cp "${REPO_ROOT}/abl/openabl/LICENSE" "${notices}/LICENSE"
+sudo cp -r "${REPO_ROOT}/abl/openabl/LICENSES" "${notices}/LICENSES"
+for f in LICENSES.md CREDITS.md PROVENANCE.md; do
+    sudo cp "${REPO_ROOT}/abl/openabl/${f}" "${notices}/${f}"
 done
 
 # Disable GRUB so ABL falls through to /KERNEL.

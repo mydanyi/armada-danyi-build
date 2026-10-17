@@ -1,45 +1,55 @@
-# Armada Danyi 个人版更新说明
+# Armada Danyi 个人版发行说明
 
-本次为 Danyi 的个人版 Armada 镜像与升级包发布。安装包与 OCI 升级包均在本仓库
-的 Releases 页面提供；本个人版不经由 Steam/官方渠道分发或被覆盖。
+本版是 Danyi 个人版 Armada 的正式发行，包含完整安装镜像、OCI 升级包与中文
+OpenABL 固件。安装包与升级包均在本仓库 Releases 页面提供；本个人版不经由
+Steam/官方渠道分发或被覆盖。
 
-## 本次改动要点
+## 本次内容
 
-- 合并上游 PR #594、#608、#609、#651、#665 与 #712 的相关改动。
-- **待下次构建**：已同步官方 2026-10-17 的上游改动，Wi-Fi 补丁 `1022/1023` 及 PR #712 均采用官方版本；现有 Release 镜像尚未包含此次同步。
-- 刷新周期重复调度修复（Gamescope #2417），并改进 FIFO 处理。
-- DRM 实际显示帧身份绑定。
-- 保留此前恢复并验收的 HUD 曲线统计方式。
-- 升级脚本 `update.sh` 新增电源保护：下载 / 逐卷校验 / 合并 / 部署全程持有
-  `systemd-inhibit` 的 `idle:sleep` 阻塞锁。
+- 同步官方上游 `2fdf06e`，并合入最新 Wi-Fi 补丁 `1022/1023` 与 PR #712。
+- 游戏模式新增升级入口：设置 → 系统 → 操作系统更新渠道 →「单翼版」，
+  默认使用本仓库 Release 的 OCI 升级包与元数据。
+- 预装 Armada Installer、LSFG-VK ARM64（r16）与 DeckyClash（内置可执行代理核心）。
+- 保留 Gamescope 刷新周期重复调度修复与 FIFO 处理、DRM 实际显示帧身份绑定，
+  以及此前已验收的 HUD 统计方式。
 
-## 预装内容
+## 中文 OpenABL 1.0
 
-- 安装个人版 Decky 插件 Armada Installer。
-- LSFG-VK ARM64（r16）。
-- DeckyClash（内置可执行代理核心）。
+- 基于 `fed5b5e57d38936bd4ab6e11be986b703fd44187` 构建。
+- SM8550 / SM8650 / SM8750 内置已审核的简体中文文案，并补齐所需字库。
+- SM8250 的中文构建超出现有构建空间，因此沿用官方 1.1.8。
+- 源码、固定依赖与许可随系统 `/usr/share/doc/OpenABL` 及本 Release 的
+  `source.tar.gz` 提供。
 
-## 使用方式
+系统升级默认**不会**自动刷写设备的 ABL，升级后已有引导菜单也不会自动变为中文。
+本版没有强制降级或刷写新 ABL 的行为。如需中文引导界面，请使用与实际设备/芯片
+匹配的固件，并按既有专项刷写流程操作。
 
-- 首次安装：下载全部 `armada-<版本>.img.gz.7z.001…` 分卷并放在同一目录，用 7-Zip 等
-  支持 7z 分卷的工具打开第一个 `.001`，自动解出完整 `.img.gz`；用 Etcher 等工具直接
-  选择该 `.img.gz` 刷机即可（无需再解压成 `.img`），详见
+## 安装与升级
+
+首次安装：下载**全部** `armada-<版本>.img.gz.7z.001…` 分卷并放在同一目录，
+用 7-Zip 打开第一个 `.001`，解出的 `.img.gz` 可直接用 Etcher 等工具刷机，
+无需再解压成 `.img`。
+
+已安装用户：OCI 升级包以 `armada-<版本>.oci.tar.partNNN` 分卷提供，由升级脚本
+按序下载、逐卷校验并合并。本 Release 同时提供 `SHA256SUMS`、
+`oci-image-info.json`、`update.sh` 与 `source.tar.gz`。
+
+固定一键升级命令：
+
+```bash
+curl -fsSL -o update.sh https://github.com/mydanyi/armada-danyi-build/releases/latest/download/update.sh && sudo bash update.sh
+```
+
+- 旧镜像首次升级：先用上面这条命令升级并手动重启，之后才能在 Steam 设置中看到
+  「单翼版」入口；只更新本仓库文件不会改变已安装设备。
+- 升级过程持有 `idle:sleep` 抑制锁，覆盖下载、校验、合并与部署；完成后**不会自动
+  重启**，请手动重启应用。
+- 详细安装、升级与回滚说明见
   [`USAGE.md`](https://github.com/mydanyi/armada-danyi-build/blob/main/personal-build/USAGE.md)。
-- 已安装用户：下载 `update.sh` 后运行 `sudo bash update.sh`，或直接执行
-  `sudo armada-danyi-update`；校验通过后由用户手动重启完成升级。已经安装官方
-  ARM Armada bootc 系统的设备也可以改用本脚本切换到本个人版，之后的个人版更新
-  继续使用本脚本或 `armada-danyi-update`。
 
-## 说明
+## 验证边界
 
-- 本次仅调整安装包分发格式：`.img.gz` 原样封装为多卷 7z（不再解压成巨大 raw 镜像）；
-  镜像内容不变。
-- **电源保护与内置脚本更新**：本次为 `update.sh` 引入系统电源抑制锁
-  （`systemd-inhibit --what=idle:sleep --mode=block`，KDE PowerDevil 等识别），
-  下载 / 逐卷校验 / 合并 / 部署全程持锁，流程结束、失败或中断时自动释放，且不改动
-  用户的电源设置。旧镜像内置的 `armada-danyi-update` **不会**因仅更新 Release 附件而
-  改变，需**重新下载最新 `update.sh`** 运行才能获得该修复；未来新构建的镜像会内置新版。
-- 本次实现的是系统 `idle:sleep` 锁；Steam 游戏模式下的实际屏幕保持仍需在真实图形会话
-  中复测验收。
-- 本个人版不会经由 Steam 官方渠道被覆盖。
-- 组合后的新镜像尚未在真机验收；本次说明不代表所有游戏均已修复。
+- SM8750 中文固件已由用户在 Odin3 中验收。
+- 其余芯片及本次完整系统镜像尚未完成真机验收。
+- 软件自测结果与实际构建结果以构建流程的核验为准。

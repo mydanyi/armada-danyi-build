@@ -212,6 +212,26 @@ if [ "${#deploy_dirs[@]}" -ne 1 ]; then
     exit 1
 fi
 DEPLOY="${deploy_dirs[0]}"
+
+# Final install-image content check: the deployment must carry exactly the
+# source ABL payloads, the ABL manifest/catalog, and the OpenABL docs (full
+# source archive plus license notices).
+for soc in SM8250 SM8550 SM8650 SM8750; do
+    payload="${DEPLOY}/usr/lib/armada/abl/abl_signed-${soc}.elf"
+    [ -f "${payload}" ] \
+        || { echo "ERROR: installed ABL payload missing: ${payload}" >&2; exit 1; }
+    cmp -s "${payload}" "/source/abl/abl_signed-${soc}.elf" \
+        || { echo "ERROR: installed ABL payload differs from source: ${payload}" >&2; exit 1; }
+done
+for f in /usr/lib/armada/abl/manifest /usr/lib/armada/abl/releases.tsv; do
+    [ -f "${DEPLOY}${f}" ] \
+        || { echo "ERROR: ABL metadata missing from image: ${DEPLOY}${f}" >&2; exit 1; }
+done
+for f in openabl-fed5b5e-source.tar.gz LICENSE LICENSES.md CREDITS.md PROVENANCE.md; do
+    [ -f "${DEPLOY}/usr/share/doc/OpenABL/${f}" ] \
+        || { echo "ERROR: OpenABL doc missing from image: ${DEPLOY}/usr/share/doc/OpenABL/${f}" >&2; exit 1; }
+done
+
 [ ! -e "${DEPLOY}/usr/libexec/armada-native-tools" ] || { echo "ERROR: build-only native tools leaked into the target deployment" >&2; exit 1; }
 ORIGIN="${DEPLOY}.origin"
 

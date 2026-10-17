@@ -53,7 +53,8 @@ if [ "${testing}" != 1 ]; then
 fi
 
 target_hash=$(manifest_get "ARMADA_ABL_SHA256_${soc}")
-version=$(manifest_get ARMADA_ABL_VERSION)
+version=$(manifest_get "ARMADA_ABL_VERSION_${soc}")
+[ -n "${version}" ] || version=$(manifest_get ARMADA_ABL_VERSION)
 payload="${target_root%/}/usr/lib/armada/abl/abl_signed-${soc}.elf"
 is_sha256 "${target_hash}" && [ -s "${payload}" ] || {
     echo "armada-abl-update: invalid target payload metadata" >&2; exit 7;

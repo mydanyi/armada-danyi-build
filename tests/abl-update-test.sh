@@ -300,4 +300,51 @@ sync_unit="$ROOT/system_files/usr/lib/systemd/system/armada-bootimg-sync.service
 grep -q '^ExecStop=-/usr/libexec/armada/armada-abl-finalize$' "$sync_unit" ||
     fail "shutdown ABL finalizer is not non-fatal"
 
+# A SoC-specific manifest version must override the global default.
+write_manifest 1
+sed -i 's/^ARMADA_ABL_VERSION=.*/ARMADA_ABL_VERSION=1.1.7/' "$PAYLOAD_DIR/manifest"
+printf 'ARMADA_ABL_VERSION_SM8550=1.1.8\n' >> "$PAYLOAD_DIR/manifest"
+cp "$old" "$ABL_A"; cp "$old" "$ABL_B"; : > "$WORK/writes"
+set +e; out=$(run_update); rc=$?; set -e
+[[ $rc -eq 0 ]] ||
+    fail "SoC-specific target version was not selected: exit $rc: $out"
+cmp -s "$payload" "$ABL_A" ||
+    fail "SoC-specific target version was not selected: ABL A was not updated"
+cmp -s "$payload" "$ABL_B" ||
+    fail "SoC-specific target version was not selected: ABL B was not updated"
+mapfile -t writes < "$WORK/writes"
+[[ "${writes[0]:-}" == "$ABL_A" && "${writes[1]:-}" == "$ABL_B" ]] ||
+    fail "SoC-specific update wrote the wrong partitions: ${writes[*]:-none}"
+
+# An unparsable SoC-specific version must abort before touching a partition.
+write_manifest 1
+printf 'ARMADA_ABL_VERSION_SM8550=not-a-version\n' >> "$PAYLOAD_DIR/manifest"
+cp "$old" "$ABL_A"; cp "$old" "$ABL_B"; : > "$WORK/writes"
+before_a=$(sha256sum "$ABL_A"); before_b=$(sha256sum "$ABL_B")
+set +e; out=$(run_update); rc=$?; set -e
+[[ $rc -eq 7 ]] ||
+    fail "invalid SoC-specific target version returned $rc instead of 7: $out"
+assert_contains "$out" "invalid target version"
+[[ ! -s "$WORK/writes" ]] || fail "invalid SoC-specific target version was written"
+[[ "$(sha256sum "$ABL_A")" == "$before_a" &&
+    "$(sha256sum "$ABL_B")" == "$before_b" ]] ||
+    fail "invalid SoC-specific target version modified a partition"
+
+# A version override for another SoC must not change this device's target.
+write_manifest 1
+printf 'ARMADA_ABL_VERSION_SM8650=1.1.9\n' >> "$PAYLOAD_DIR/manifest"
+cp "$old" "$ABL_A"; cp "$old" "$ABL_B"; : > "$WORK/writes"
+set +e; out=$(run_update); rc=$?; set -e
+[[ $rc -eq 0 ]] ||
+    fail "foreign SoC override changed the target: exit $rc: $out"
+cmp -s "$payload" "$ABL_A" ||
+    fail "foreign SoC override blocked the SM8550 update on A"
+cmp -s "$payload" "$ABL_B" ||
+    fail "foreign SoC override blocked the SM8550 update on B"
+mapfile -t writes < "$WORK/writes"
+[[ "${writes[0]:-}" == "$ABL_A" && "${writes[1]:-}" == "$ABL_B" ]] ||
+    fail "foreign SoC override wrote the wrong partitions: ${writes[*]:-none}"
+
+write_manifest 1
+
 printf 'ABL update test passed\n'
