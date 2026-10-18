@@ -19,26 +19,63 @@ chmod 0755 /usr/lib/decky-loader/armada-decky-sync
 
 decky_release="$(
     curl --retry 12 --retry-delay 10 -fsSL \
-        https://api.github.com/repos/SteamDeckHomebrew/decky-loader/releases |
-        jq -r 'first(.[])'
+        'https://api.github.com/repos/SteamDeckHomebrew/decky-loader/releases?per_page=100' |
+        jq -ce '
+            [.[] | select(.draft != true and .prerelease == true)]
+            | if length == 0
+              then error("no Decky Loader preview release found")
+              else max_by(.published_at)
+              end
+        '
 )"
-decky_version="$(jq -r '.tag_name' <<<"${decky_release}")"
-decky_url="$(jq -r '.assets[].browser_download_url | select(endswith("PluginLoader"))' <<<"${decky_release}")"
-decky_service_url=https://raw.githubusercontent.com/SteamDeckHomebrew/decky-loader/main/dist/plugin_loader-prerelease.service
+decky_version="$(jq -er '.tag_name | select(type == "string" and length > 0)' <<<"${decky_release}")"
+[[ "${decky_version}" =~ ^[A-Za-z0-9._+-]+$ ]]
+[[ "$(jq -r '.draft // false' <<<"${decky_release}")" == "false" ]]
+[[ "$(jq -r '.prerelease // false' <<<"${decky_release}")" == "true" ]]
 
-[[ -n "${decky_version}" && "${decky_version}" != "null" ]]
-[[ -n "${decky_url}" && "${decky_url}" != "null" ]]
+decky_asset="$(
+    jq -c '[.assets[]? | select(.name == "PluginLoader-arm64")] | if length == 1 then .[0] else empty end' \
+        <<<"${decky_release}"
+)"
+[[ -n "${decky_asset}" ]]
+decky_url="$(jq -er '.browser_download_url | select(type == "string" and length > 0)' <<<"${decky_asset}")"
+decky_digest="$(jq -er '.digest | select(type == "string" and length > 0)' <<<"${decky_asset}")"
+[[ "${decky_digest}" =~ ^sha256:[0-9a-fA-F]{64}$ ]]
+decky_service_url="https://raw.githubusercontent.com/SteamDeckHomebrew/decky-loader/${decky_version}/dist/plugin_loader-prerelease.service"
 
 install -d -m 0755 /usr/share/decky-loader
-curl --retry 12 --retry-delay 10 -fL -o /usr/share/decky-loader/PluginLoader "${decky_url}"
-chmod 0755 /usr/share/decky-loader/PluginLoader
-printf '%s\n' "${decky_version}" > /usr/share/decky-loader/.loader.version
+decky_loader_tmp="$(mktemp)"
 decky_service_tmp="$(mktemp)"
+cleanup_decky_tmp() {
+    rm -f "${decky_loader_tmp}" "${decky_service_tmp}"
+}
+trap cleanup_decky_tmp EXIT
+
+curl --retry 12 --retry-delay 10 -fL -o "${decky_loader_tmp}" "${decky_url}"
+printf '%s  %s\n' "${decky_digest#sha256:}" "${decky_loader_tmp}" | sha256sum -c -
+python3 - "${decky_loader_tmp}" <<'PY'
+import struct
+import sys
+
+with open(sys.argv[1], "rb") as handle:
+    header = handle.read(20)
+if (
+    len(header) != 20
+    or header[:4] != b"\x7fELF"
+    or header[4] != 2
+    or header[5] != 1
+    or struct.unpack_from("<H", header, 18)[0] != 183
+):
+    raise SystemExit("Decky PluginLoader payload is not a 64-bit little-endian AArch64 ELF")
+PY
+
+install -m 0755 "${decky_loader_tmp}" /usr/share/decky-loader/PluginLoader
+printf '%s\n' "${decky_version}" > /usr/share/decky-loader/.loader.version
+
 curl --retry 12 --retry-delay 10 -fsSL "${decky_service_url}" |
     sed 's#${HOMEBREW_FOLDER}#/var/home/armada/homebrew#g' \
         >"${decky_service_tmp}"
 install -D -m 0644 "${decky_service_tmp}" /etc/systemd/system/plugin_loader.service
-rm -f "${decky_service_tmp}"
 
 systemctl enable armada-decky-sync.service
 systemctl enable plugin_loader.service

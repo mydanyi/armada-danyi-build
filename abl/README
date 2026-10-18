@@ -6,7 +6,7 @@ actual SoC of your device. OpenABL notices are in OpenABL-notices, and the full
 source is installed at /usr/share/doc/OpenABL and published as source.tar.gz in
 the Release.
 
-1. Copy the rocknix_abl folder from the SD card to the root of Android internal storage.
+1. Copy the OpenABL folder from the SD card to the root of Android internal storage.
 
 2. Identify the SoC for your device (flashing the wrong ABL can brick the device,
    so match it carefully):
@@ -22,7 +22,7 @@ the Release.
               KONKR Pocket FIT (8 Elite)
 
 3. Using "run script as root" in settings, browse to your SoC's folder (e.g.
-   rocknix_abl/SM8750) and run backup_abl.sh to back up your current ABL.
+   OpenABL/SM8750) and run backup_abl.sh to back up your current ABL.
 
 4. Copy the backup (abl_a.img and abl_b.img, written into your SoC folder) to your
    PC for safekeeping.

@@ -117,6 +117,61 @@ run case3; ok case3; chg case3 false
 [[ -z "$(git_ -C "$P" status --porcelain)" ]] || fail 'case3: working tree not clean'
 pass 'case3: no upstream change -> changed=false, HEAD unchanged'
 
+# Case 3b -- plugin-only change: upstream has nothing new, but the repo's own
+# personal-build/sync-plugins.py bumps a lock entry. The first run must commit
+# the plugin change as a clean commit and report changed=true; the second run
+# is a no-op with changed=false and an unchanged HEAD.
+mkdir -p "$P/personal-build"
+cat > "$P/personal-build/plugins.lock.json" <<'JSON'
+[
+  {
+    "name": "armada-installer",
+    "version": "0.1.0",
+    "url": "https://github.com/mydanyi/armada-installer/releases/download/v0.1.0/armada-installer-0.1.0.zip",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "directory": "armada-installer"
+  }
+]
+JSON
+cat > "$P/personal-build/sync-plugins.py" <<'PY'
+#!/usr/bin/env python3
+"""Process-boundary stub: bump armada-installer 0.1.0 -> 0.2.0 once."""
+import json
+import os
+import sys
+
+repo = sys.argv[1]
+lock = os.path.join(repo, "personal-build", "plugins.lock.json")
+with open(lock, encoding="utf-8") as handle:
+    entries = json.load(handle)
+updated = []
+for entry in entries:
+    if entry.get("version") == "0.1.0":
+        entry["version"] = "0.2.0"
+        updated.append(entry["name"])
+if updated:
+    with open(lock, "w", encoding="utf-8") as handle:
+        json.dump(entries, handle, indent=2)
+        handle.write("\n")
+print(json.dumps({"updated": updated, "skipped": []}))
+PY
+git_ -C "$P" add -A; git_ -C "$P" commit -qm 'personal: add plugin lock and sync helper'
+G0="$(git_ -C "$P" rev-parse HEAD)"
+run case3b; ok case3b; chg case3b true
+[[ "$(git_ -C "$P" rev-parse HEAD)" != "$G0" ]] \
+    || fail 'case3b: plugin update was not committed'
+[[ -z "$(git_ -C "$P" status --porcelain)" ]] \
+    || fail 'case3b: working tree not clean after plugin commit'
+grep -qF '"version": "0.2.0"' "$P/personal-build/plugins.lock.json" \
+    || fail 'case3b: lock was not updated to 0.2.0'
+G1="$(git_ -C "$P" rev-parse HEAD)"
+run case3b_again; ok case3b_again; chg case3b_again false
+[[ "$(git_ -C "$P" rev-parse HEAD)" == "$G1" ]] \
+    || fail 'case3b: second plugin run moved HEAD without a change'
+grep -qF '"version": "0.2.0"' "$P/personal-build/plugins.lock.json" \
+    || fail 'case3b: lock version changed on the no-op run'
+pass 'case3b: plugin-only change committed once, second run no-op'
+
 # Case 4 -- both sides edit README: helper must fail, restore HEAD, abort the merge.
 printf 'personal edit\n' > "$P/README.md"
 git_ -C "$P" add -A; git_ -C "$P" commit -qm 'personal: edit README'

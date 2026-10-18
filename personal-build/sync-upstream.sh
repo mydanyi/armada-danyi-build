@@ -4,13 +4,16 @@
 # Merges new commits from armada-os/armada main into the personal build repo and
 # keeps the personal layer (the two custom workflows, Chinese/plugin/unmerged
 # patches, build config) intact; official workflows upstream adds are relocated
-# out of .github/workflows. It only prepares a local merge commit -- never a
-# push, PR or build dispatch (the workflow decides whether to push).
+# out of .github/workflows. When the repo carries a plugin lock and helper, the
+# bundled Decky plugin releases are refreshed as well. It only prepares local
+# commits -- never a push, PR or build dispatch (the workflow decides whether to
+# push).
 #
 # Usage: bash personal-build/sync-upstream.sh <repo-path>
 #   UPSTREAM_URL   upstream git URL (default https://github.com/armada-os/armada.git;
 #                  tests use a local fixture). origin is never changed.
-#   GITHUB_OUTPUT  when set, changed/new_sha are appended for the workflow.
+#   GITHUB_OUTPUT  when set, changed/new_sha/plugins_updated/plugins_skipped are
+#                  appended for the workflow.
 #
 # Requires a clean tree (uncommitted work is never reset or overwritten); on a
 # conflict it aborts the merge and restores the original HEAD/index.
@@ -66,15 +69,79 @@ if [[ -n "$(git_ status --porcelain)" ]]; then
     exit 1
 fi
 
+# The HEAD this run started from: plugins alone may move it forward.
+START_SHA="$(git_ rev-parse HEAD)"
+
+# Refresh the bundled plugin releases through the repository's own helper and
+# commit only the lock plus the private package directory. Repos without the
+# lock/helper (older fixtures, upstream checkouts) simply skip this step.
+sync_plugins() {
+    local pb="${REPO}/personal-build"
+    if [[ ! -f "${pb}/plugins.lock.json" || ! -f "${pb}/sync-plugins.py" ]]; then
+        echo "==> Plugin releases: no lock/helper in this repo; skipping"
+        return 0
+    fi
+
+    local out rc
+    set +e
+    out="$(python3 "${pb}/sync-plugins.py" "${REPO}")"
+    rc=$?
+    set -e
+    if (( rc != 0 )); then
+        echo "ERROR: plugin release sync failed (exit ${rc}); refusing to continue" >&2
+        exit 1
+    fi
+
+    local stats
+    if ! stats="$(printf '%s' "${out}" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+print(len(data["updated"]))
+print(len(data["skipped"]))
+print(", ".join(data["updated"]) or "-")
+print(", ".join(data["skipped"]) or "-")
+')"; then
+        echo "ERROR: plugin release sync did not print the expected JSON" >&2
+        exit 1
+    fi
+
+    local fields
+    mapfile -t fields <<< "${stats}"
+    echo "==> Plugin releases: updated ${fields[0]} (${fields[2]}); skipped ${fields[1]} (${fields[3]})"
+    emit plugins_updated "${fields[0]}"
+    emit plugins_skipped "${fields[1]}"
+
+    git_ add -A -- personal-build/plugins.lock.json
+    if [[ -d "${pb}/plugin-assets" ]]; then
+        git_ add -A -- personal-build/plugin-assets
+    fi
+    if ! git_ diff --cached --quiet; then
+        echo "==> Committing bundled plugin release update"
+        git_ commit -q -m "chore: sync bundled Decky plugin releases"
+    else
+        echo "==> Plugin releases: nothing to commit"
+    fi
+}
+
 # 2. Fetch upstream main into a remote-tracking ref; origin is left untouched.
 echo "==> Fetching ${UPSTREAM_URL} main"
 git_ fetch --no-tags "${UPSTREAM_URL}" "+main:refs/remotes/upstream/main"
 UP_SHA="$(git_ rev-parse refs/remotes/upstream/main)"
 
-# 3. Upstream main is already an ancestor of our HEAD: nothing to merge.
+# 3. Upstream main is already an ancestor of our HEAD: nothing to merge, but a
+#    newer bundled plugin release may still need committing.
 if git_ merge-base --is-ancestor "${UP_SHA}" HEAD; then
     echo "==> Upstream main (${UP_SHA}) is already in history; nothing to merge"
-    emit changed false
+    sync_plugins
+    FINAL_SHA="$(git_ rev-parse HEAD)"
+    emit new_sha "${FINAL_SHA}"
+    if [[ "${FINAL_SHA}" == "${START_SHA}" ]]; then
+        emit changed false
+    else
+        emit changed true
+    fi
     exit 0
 fi
 
@@ -134,5 +201,9 @@ if [[ "$(wc -w <<< "$(git_ show -s --format=%P "${NEW_SHA}")")" -ne 2 ]]; then
 fi
 
 echo "==> Merged upstream ${UP_SHA} into ${NEW_SHA}"
+
+# 7. Same plugin finish as the no-merge path; it may add one commit on top.
+sync_plugins
+FINAL_SHA="$(git_ rev-parse HEAD)"
 emit changed true
-emit new_sha "${NEW_SHA}"
+emit new_sha "${FINAL_SHA}"

@@ -131,3 +131,40 @@ sudo armada-danyi-update
   中文引导，请使用与实际设备/芯片匹配的固件，并按既有专项刷写流程操作。
 - OpenABL 通知见 `OpenABL-notices`，完整源码随系统 `/usr/share/doc/OpenABL` 及本
   Release 的 `source.tar.gz` 提供。
+
+## 七、预装插件与每日发行同步
+
+- 随镜像预装三个独立的 Decky 插件：Armada Installer、LSFG-VK ARM64 与 DeckyClash。
+  三者的版本、下载地址与 SHA256 记录在 `personal-build/plugins.lock.json`；私有
+  LSFG 的原始 ZIP 同时保存在 `personal-build/plugin-assets/`，供镜像内置。
+- 每日上游同步（服务器定时器与手动 GitHub workflow 共用
+  `personal-build/sync-upstream.sh`）在合并上游后调用
+  `personal-build/sync-plugins.py`：只查询这三个插件的 GitHub Releases 最新正式版，
+  下载 ARM64 资产并边下载边校验 SHA256，再核对 ZIP 内该插件目录下的
+  `plugin.json`、`main.py`、`dist/index.js`。**整批校验通过后**才原子替换锁文件与
+  私有包；任一条目哈希或包结构不符都会整批放弃、返回失败，同步不会推送。
+  草稿或预发布版本一律不采用，已锁定版本不会被降级。
+- 只有这三个独立插件随发行包更新；其余随上游源码构建的插件仍跟随上游源码，不在
+  该锁文件中。插件更新**不会**触发镜像构建：个人版镜像仍只手动构建和发布。
+- 私有仓库（LSFG-VK ARM64）需要只读凭据，按以下顺序取第一个可用的：
+  环境变量 `ARMADA_PLUGIN_TOKEN_FILE` 指向的 token 文件；执行环境提供的
+  `credentials/plugin-release-read-token`（相对 `ARMADA_EXECUTION_BASE`）；环境变量
+  `GH_TOKEN` / `GITHUB_TOKEN`。GitHub Actions 中对应只读 secret 名为
+  `PLUGIN_RELEASE_READ_TOKEN`。该凭据只需要私有仓库 Release 的只读 Contents 权限，
+  只用于读取发行资产，不会写入锁文件、下载地址或日志。**缺少凭据时只跳过私有
+  LSFG 并标记为 skipped**，公开插件照常更新；跳过的条目保持原锁定版本，不会被
+  当成“已是最新”。
+- 插件目录在开机播种时的处理：保留用户在设备上较新或已修改的副本；由镜像管理的
+  副本可随系统更新替换；无法判定归属的同版本旧目录保持原样，不做清理。已有的用户
+  配置与其他文档不受影响。
+
+### Decky 平台
+
+镜像内置的 Decky Loader 平台与上述三个插件 ZIP 相互独立：每次**手动**构建镜像时，
+从 Decky Loader 的 GitHub Release 列表中获取**最新预览版**（非草稿的 prerelease，
+按 `published_at` 取最新，当前为 v3.3.0-pre1）的原生 ARM64 `PluginLoader-arm64`，
+校验 Release 记录的版本、资产 SHA256 与 ELF 目标架构后才写入镜像；没有可用预览版时
+构建失败，不会回退到正式版。设备开机时由 `armada-decky-sync` 播种该 Loader；全新
+安装默认使用预览版，已有设备保留自身的 `loader.json` 记录与更高版本，已安装的较新
+正式版（如 v3.3.0）不会被强制降级。镜像与升级包仍需**手动**构建和发布，本说明不
+改变现有设备的更新渠道，也不改动 Steam 的稳定版设置。

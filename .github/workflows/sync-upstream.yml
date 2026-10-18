@@ -1,6 +1,8 @@
-name: Sync Armada upstream
+name: Sync Armada upstream and bundled plugins
 
-# Merge armada-os/armada main into this personal build repo.
+# Merge armada-os/armada main into this personal build repo and, when the repo
+# carries personal-build/plugins.lock.json, refresh the three standalone Decky
+# plugin releases it pins (armada-installer, LSFG-VK ARM64, DeckyClash).
 #
 # Manual-only. The daily merge is run by the server-side systemd timer
 # armada-personal-upstream-sync.timer on the 192.168.88.9 host, which starts the
@@ -13,8 +15,7 @@ name: Sync Armada upstream
 # config) is kept as is. It never builds an image, opens a PR or dispatches a
 # workflow: the personal image is still built manually and separately. The push
 # uses a dedicated, repo-scoped write deploy key already provisioned on the
-# runner; this workflow never prints deploy-key contents and adds no GitHub
-# secret.
+# runner; this workflow never prints deploy-key contents.
 on:
   # Manual-only: the daily 04:17 Asia/Hong_Kong sync is performed by the server
   # timer (armada-personal-upstream-sync.timer). Trigger this by hand for an
@@ -46,6 +47,13 @@ jobs:
       - name: Sync upstream into main
         id: sync
         shell: bash
+        env:
+          # Optional read-only token for the private LSFG-VK release repo. When
+          # the secret is absent it is passed as an empty value, the private
+          # plugin is reported as skipped and the public plugins still sync.
+          # GITHUB_TOKEN is deliberately not offered: it must not reach the
+          # private repository.
+          GH_TOKEN: ${{ secrets.PLUGIN_RELEASE_READ_TOKEN }}
         run: bash personal-build/sync-upstream.sh "${GITHUB_WORKSPACE}"
 
       - name: Push synced main
@@ -75,20 +83,25 @@ jobs:
         run: |
           changed='${{ steps.sync.outputs.changed }}'
           sha='${{ steps.sync.outputs.new_sha }}'
+          plugins_updated='${{ steps.sync.outputs.plugins_updated }}'
+          plugins_skipped='${{ steps.sync.outputs.plugins_skipped }}'
           {
-            echo "## Sync Armada upstream"
+            echo "## Sync Armada upstream and bundled plugins"
             echo
             if [[ "${changed}" == 'true' ]]; then
               if [[ '${{ steps.push.outcome }}' == 'success' ]]; then
-                echo "Merged a new upstream commit: \`${sha}\` (pushed to main)."
+                echo "Synced main to \`${sha}\`: upstream merge and/or bundled plugin release update (pushed to main)."
               else
-                echo "Merged a new upstream commit: \`${sha}\`; local merge prepared but push failed — main was not updated."
+                echo "Prepared \`${sha}\` locally (upstream merge and/or bundled plugin release update); push failed — main was not updated."
               fi
             elif [[ "${changed}" == 'false' ]]; then
-              echo "No new upstream commits; nothing to push."
+              echo "No new upstream commits and no bundled plugin release changes; nothing to push."
             else
               echo "Sync did not complete (outcome: ${{ steps.sync.outcome }})."
             fi
+            echo
+            echo "Bundled plugin releases: ${plugins_updated:-0} updated, ${plugins_skipped:-0} skipped."
+            echo "A skipped private plugin (missing read credential) keeps its locked version."
             echo
             echo "No build was triggered: the personal image is built manually only."
           } >> "${GITHUB_STEP_SUMMARY}"

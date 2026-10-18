@@ -34,10 +34,10 @@ fi
 mkdir -p "${WORK}/mnt"
 sudo mount "${ESP}" "${WORK}/mnt"
 
-sudo mkdir -p "${WORK}/mnt/rocknix_abl"
+sudo mkdir -p "${WORK}/mnt/OpenABL"
 # One image serves all devices, so stage a self-contained folder per SoC.
 # vfat has no Unix ownership, so `cp -a` would error on chown under set -e.
-sudo cp "${REPO_ROOT}/abl/README" "${WORK}/mnt/rocknix_abl/README"
+sudo cp "${REPO_ROOT}/abl/README" "${WORK}/mnt/OpenABL/README"
 for soc in SM8250 SM8550 SM8650 SM8750; do
     version_key="ARMADA_ABL_VERSION_${soc}"
     soc_version=${!version_key:-${ARMADA_ABL_VERSION}}
@@ -56,7 +56,7 @@ for soc in SM8250 SM8550 SM8650 SM8750; do
         echo "ERROR: ${soc} payload hash does not match the approved release" >&2
         exit 1
     }
-    d="${WORK}/mnt/rocknix_abl/${soc}"
+    d="${WORK}/mnt/OpenABL/${soc}"
     sudo mkdir -p "$d"
     sudo cp "${payload}" "$d/"
     printf '%s  abl_signed-%s.elf\n' "${approved_hash}" "${soc}" \
@@ -71,7 +71,7 @@ done
 # OpenABL license notices on the ESP. The full GPL source archive stays in the
 # system image (/usr/share/doc/OpenABL) and the Release source package, so the
 # ESP only carries the notices.
-notices="${WORK}/mnt/rocknix_abl/OpenABL-notices"
+notices="${WORK}/mnt/OpenABL/OpenABL-notices"
 sudo mkdir -p "${notices}"
 sudo cp "${REPO_ROOT}/abl/openabl/LICENSE" "${notices}/LICENSE"
 sudo cp -r "${REPO_ROOT}/abl/openabl/LICENSES" "${notices}/LICENSES"

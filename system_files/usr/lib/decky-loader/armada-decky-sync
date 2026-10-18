@@ -6,6 +6,35 @@ homebrew="/var/home/${user_name}/homebrew"
 loader_src=/usr/share/decky-loader/PluginLoader
 loader_version_src=/usr/share/decky-loader/.loader.version
 src=/usr/share/decky-plugins
+plugin_seed=/usr/lib/decky-loader/armada-plugin-seed.py
+
+elf_machine() {
+    python3 - "$1" <<'PY'
+import struct
+import sys
+
+try:
+    with open(sys.argv[1], "rb") as handle:
+        header = handle.read(20)
+except OSError:
+    raise SystemExit(0)
+
+if (
+    len(header) == 20
+    and header[:4] == b"\x7fELF"
+    and header[4] == 2
+    and header[5] == 1
+):
+    print(struct.unpack_from("<H", header, 18)[0])
+PY
+}
+
+loader_needs_arch_migration() {
+    [[ -x "${loader_src}" ]] || return 1
+    [[ -f "${homebrew}/services/PluginLoader" ]] || return 1
+    [[ "$(elf_machine "${loader_src}")" == 183 ]] || return 1
+    [[ "$(elf_machine "${homebrew}/services/PluginLoader")" == 62 ]]
+}
 
 loader_needs_seed() {
     [[ ! -x "${homebrew}/services/PluginLoader" ]] && return 0
@@ -20,6 +49,9 @@ loader_needs_seed() {
     bundled_sort=${bundled/-/${prerelease_marker}}
     current_sort=${current/-/${prerelease_marker}}
     newest=$(printf '%s\n%s\n' "${current_sort}" "${bundled_sort}" | sort -V | tail -n1)
+    if [[ "${bundled}" == "${current}" ]] && loader_needs_arch_migration; then
+        return 0
+    fi
     [[ "${newest}" == "${bundled_sort}" && "${bundled}" != "${current}" ]]
 }
 
@@ -43,12 +75,8 @@ if [[ ! -f "${homebrew}/settings/loader.json" ]]; then
 fi
 
 if [[ -d "$src" ]]; then
-    for plugin in "$src"/*/; do
-        [[ -d "$plugin" ]] || continue
-        name=$(basename "$plugin")
-        rm -rf "${homebrew}/plugins/${name}"
-        cp -a "$plugin" "${homebrew}/plugins/${name}"
-    done
+    # Decky owns plugin updates; the image only seeds new or untouched copies.
+    python3 "$plugin_seed" "$src" "${homebrew}/plugins" "${homebrew}/settings/armada-plugin-seed.json"
 fi
 
 chown "${user_name}:${user_name}" "${homebrew}"
