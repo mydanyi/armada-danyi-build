@@ -8,14 +8,13 @@ register the SoCCP reports its D-state in (0x1fda000), so also describe
 the TCSR block at 0x1fc0000 as a plain syscon; on SM8750 the TCSR clock
 controller moved to its own block and nothing else uses it.
 
-The node is enabled in the SoC file on purpose. The bootloader starts
-the SoCCP on every SM8750 board, and the driver has to hold its bus path
-until the image it loads is in D3 (see the PAS driver change). A board
-that ships no soccp.mbn keeps that vote and still wakes from s2idle.
+The node is enabled in the SoC file: the bootloader starts the SoCCP
+on every SM8750 board, and a board without soccp.mbn still needs the
+driver's bus vote to wake from s2idle.
 ---
 --- a/arch/arm64/boot/dts/qcom/sm8750.dtsi
 +++ b/arch/arm64/boot/dts/qcom/sm8750.dtsi
-@@ -665,6 +665,73 @@
+@@ -665,6 +665,66 @@
  		/* TODO: smem mailbox in and out */
  	};
  
@@ -46,13 +45,6 @@ that ships no soccp.mbn keeps that vote and still wakes from s2idle.
 +		};
 +	};
 +
-+	/*
-+	 * The bootloader leaves an early SoCCP image running in D0 with no bus
-+	 * vote of its own. The driver holds the SoCCP's path to DDR from probe
-+	 * until the image it loads has parked itself in D3, as read from the
-+	 * TCSR D-state register. Enabled for every board: without the firmware
-+	 * the vote is simply kept, which is what lets the SoC wake from s2idle.
-+	 */
 +	remoteproc_soccp: remoteproc-soccp {
 +		compatible = "qcom,sm8750-soccp-pas";
 +
@@ -89,7 +81,7 @@ that ships no soccp.mbn keeps that vote and still wakes from s2idle.
  	soc: soc@0 {
  		compatible = "simple-bus";
  
-@@ -2190,6 +2257,11 @@
+@@ -2190,6 +2250,11 @@
  			#hwlock-cells = <1>;
  		};
  

@@ -1,28 +1,18 @@
 From: Armada <noreply@armada.local>
 Subject: [PATCH] remoteproc: qcom: pas: manage the SM8750 SoCCP
 
-The SM8750 bootloader leaves an early SoCCP image running. It stays in
-D0, ignores SMP2P and has no bus vote of its own. The SoCCP sits on the
-aggre2 NoC behind the system NoC, and an s2idle wake from a full CPU
-subsystem power collapse hangs whenever every system NoC vote is 0 in
-the APPS sleep set. The vendor kernel reloads soccp.mbn through PAS
-(id 51) at boot; that image parks itself in D3 and no longer needs the
-bus, after which the SoC also reaches CX shutdown and DDR low power in
-suspend.
+The SM8750 bootloader leaves an early SoCCP image running in D0 with no
+bus vote of its own, and an s2idle wake from a full power collapse hangs
+unless the system NoC stays voted. The vendor kernel reloads soccp.mbn
+through PAS (id 51) at boot; that image parks itself in D3, and the SoC
+then reaches CX shutdown and DDR low power in suspend.
 
-Add the SM8750 SoCCP with the vendor's PAS id and crash-reason SMEM
-item and the CX/MX proxy domains used for the Kaanapali SoCCP, and boot
-it automatically.
-
-Until that image is in D3, vote the SoCCP's path to DDR on its behalf:
-take a second handle on the node's interconnect path at probe and vote
-it with the vendor's low-SVS bandwidth. The vote is dropped only when
-the D-state register named by qcom,soccp-dstate (TCSR, 2 = D0, 4 = D1,
-8 = D3) shows D3, checked at handover and again when a system suspend
-is prepared. A board without the firmware, a failed load, or an image
-that never reaches D3 therefore keeps the vote, which holds SN0 and SN3
-(and SH0, SH1, MC0) in the sleep set and avoids the hang at the cost of
-the deeper sleep states.
+Add the SM8750 SoCCP with the vendor's PAS id, crash-reason SMEM item
+and CX/MX proxy domains, and boot it automatically. Vote the SoCCP's
+path to DDR at probe and drop the vote only once the D-state register
+named by qcom,soccp-dstate (TCSR, 2 = D0, 4 = D1, 8 = D3) shows D3, at
+handover or when a system suspend is prepared. Without the firmware the
+vote stays: the SoC wakes, without the deeper sleep states.
 ---
 --- a/drivers/remoteproc/qcom_q6v5_pas.c
 +++ b/drivers/remoteproc/qcom_q6v5_pas.c
@@ -67,7 +57,7 @@ the deeper sleep states.
  };
  
  static void qcom_pas_segment_dump(struct rproc *rproc,
-@@ -378,10 +388,72 @@
+@@ -378,10 +388,64 @@
  	return ret;
  }
  
@@ -75,14 +65,7 @@ the deeper sleep states.
 +#define SOCCP_BOOT_KBPS		1200
 +#define SOCCP_D3_POLL_US		(10 * USEC_PER_MSEC)
 +
-+/*
-+ * The SM8750 bootloader leaves an early SoCCP image running. It stays in D0,
-+ * ignores SMP2P and has no bus vote of its own, and the SoC hangs on wake
-+ * from a full power collapse unless the system NoC is kept on for it. Vote
-+ * the SoCCP's path to DDR on its behalf, in every RPMh set, until the image
-+ * loaded here has parked itself in D3. Without that image, or without the
-+ * D-state register, the vote is simply kept.
-+ */
++/* The bootloader's SoCCP image has no bus vote, and s2idle wake hangs without one */
 +static int qcom_pas_boot_vote(struct qcom_pas *pas)
 +{
 +	struct device *dev = pas->dev;
@@ -109,7 +92,6 @@ the deeper sleep states.
 +	return 0;
 +}
 +
-+/* Drop the boot vote once the D-state register shows D3; true when dropped */
 +static bool qcom_pas_boot_vote_release(struct qcom_pas *pas)
 +{
 +	u32 val = 0;
@@ -140,7 +122,7 @@ the deeper sleep states.
  	if (pas->px_supply)
  		regulator_disable(pas->px_supply);
  	if (pas->cx_supply)
-@@ -880,6 +952,12 @@
+@@ -880,6 +944,12 @@
  		goto unassign_mem;
  	pas->proxy_pd_count = ret;
  
@@ -153,14 +135,11 @@ the deeper sleep states.
  	ret = qcom_q6v5_init(&pas->q6v5, pdev, rproc, desc->crash_reason_smem,
  			     desc->load_state, qcom_pas_handover);
  	if (ret)
-@@ -958,6 +1036,24 @@
+@@ -958,6 +1028,21 @@
  	device_init_wakeup(pas->dev, false);
  }
  
-+/*
-+ * An image that parks itself only after the handover is caught here, before
-+ * the sleep set is flushed.
-+ */
++/* Catches an image that parks itself only after the handover */
 +static int qcom_pas_pm_prepare(struct device *dev)
 +{
 +	struct qcom_pas *pas = dev_get_drvdata(dev);
@@ -178,14 +157,10 @@ the deeper sleep states.
  static const struct qcom_pas_data adsp_resource_init = {
  	.crash_reason_smem = 423,
  	.firmware_name = "adsp.mdt",
-@@ -1220,6 +1316,25 @@
+@@ -1220,6 +1305,21 @@
  	.ssctl_id = 0x20,
  };
  
-+/*
-+ * Started by the bootloader with an early image that Linux cannot manage;
-+ * loading soccp.mbn replaces it. See qcom_pas_boot_vote().
-+ */
 +static const struct qcom_pas_data sm8750_soccp_resource = {
 +	.crash_reason_smem = 656,
 +	.firmware_name = "soccp.mbn",
@@ -204,7 +179,7 @@ the deeper sleep states.
  static const struct qcom_pas_data x1e80100_adsp_resource = {
  	.crash_reason_smem = 423,
  	.firmware_name = "adsp.mdt",
-@@ -1712,6 +1827,7 @@
+@@ -1712,6 +1812,7 @@
  	{ .compatible = "qcom,sm8650-cdsp-pas", .data = &sm8650_cdsp_resource },
  	{ .compatible = "qcom,sm8650-mpss-pas", .data = &sm8650_mpss_resource },
  	{ .compatible = "qcom,sm8750-mpss-pas", .data = &sm8750_mpss_resource },
@@ -212,7 +187,7 @@ the deeper sleep states.
  	{ .compatible = "qcom,x1e80100-adsp-pas", .data = &x1e80100_adsp_resource },
  	{ .compatible = "qcom,x1e80100-cdsp-pas", .data = &x1e80100_cdsp_resource },
  	{ },
-@@ -1724,6 +1840,7 @@
+@@ -1724,6 +1825,7 @@
  	.driver = {
  		.name = "qcom_q6v5_pas",
  		.of_match_table = qcom_pas_of_match,
