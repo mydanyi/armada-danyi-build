@@ -6,18 +6,26 @@ Steam/官方渠道分发或被覆盖。
 
 ## 本次内容
 
-- 同步官方上游 `2fdf06e`，并合入最新 Wi-Fi 补丁 `1022/1023` 与 PR #712。
-- 游戏模式新增升级入口：设置 → 系统 → 操作系统更新渠道 →「单翼版」，
-  默认使用本仓库 Release 的 OCI 升级包与元数据。
-- 预装 Armada Installer、LSFG-VK ARM64（r16）与 DeckyClash（内置可执行代理核心）。
+- 同步官方上游 `64207e6`（官方 main 源码，2026 年 10 月 19 日同步）；Wi-Fi 补丁
+  `1022/1023` 与 PR #712 仍与官方保持一致。
+- 合入 PR #751 Plasma 语言修复：界面语言遵循系统/Steam 所选语言，修复桌面中文显示，
+  并保留日期与数字格式偏好。
+- 游戏模式升级入口：设置 → 系统 → 操作系统更新渠道 →「单翼版」，默认使用本仓库
+  Release 的 OCI 升级包与元数据。Steam 客户端保持默认稳定版，与「单翼版」系统更新
+  渠道相互独立。
+- 预装 Armada Installer 0.2.0、LSFG-VK ARM64（r16）与 DeckyClash 1.3.5（含内置
+  可执行代理核心）。插件更新保留用户已更新或修改的副本，仅更新未改动的随镜像副本。
+- 内置 Decky 平台在每次手动构建时选取最新预览版，原生 ARM64（当前为 v3.3.0-pre1，
+  不是永久固定版本）；已有的较新 Loader 与 `loader.json` 用户选择会被保留。
 - 保留 Gamescope 刷新周期重复调度修复与 FIFO 处理、DRM 实际显示帧身份绑定，
-  以及此前已验收的 HUD 统计方式。
+  以及既有的 HUD 统计方式。
 
 ## 中文 OpenABL 1.0
 
+- 中文 OpenABL 使用新增的 `OpenABL` 目录提供。
 - 基于 `fed5b5e57d38936bd4ab6e11be986b703fd44187` 构建。
 - SM8550 / SM8650 / SM8750 内置已审核的简体中文文案，并补齐所需字库。
-- SM8250 的中文构建超出现有构建空间，因此沿用官方 1.1.8。
+- SM8250 保留官方 1.1.8。
 - 源码、固定依赖与许可随系统 `/usr/share/doc/OpenABL` 及本 Release 的
   `source.tar.gz` 提供。
 
@@ -46,10 +54,4 @@ curl -fsSL -o update.sh https://github.com/mydanyi/armada-danyi-build/releases/l
 - 升级过程持有 `idle:sleep` 抑制锁，覆盖下载、校验、合并与部署；完成后**不会自动
   重启**，请手动重启应用。
 - 详细安装、升级与回滚说明见
-  [`USAGE.md`](https://github.com/mydanyi/armada-danyi-build/blob/main/personal-build/USAGE.md)。
-
-## 验证边界
-
-- SM8750 中文固件已由用户在 Odin3 中验收。
-- 其余芯片及本次完整系统镜像尚未完成真机验收。
-- 软件自测结果与实际构建结果以构建流程的核验为准。
+  [`USAGE.md`](https://github.com/mydanyi/armada-danyi-build/blob/main/personal-build/USAGE.md).
