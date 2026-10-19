@@ -1,9 +1,9 @@
 [
   {
     "name": "armada-installer",
-    "version": "0.2.0",
-    "url": "https://github.com/mydanyi/armada-installer/releases/download/v0.2.0/armada-installer-0.2.0.zip",
-    "sha256": "e837d87eaf0a6af346db9c73edae72d56e489380461bb55576ea73b6c5a4c9dd",
+    "version": "0.2.1",
+    "url": "https://github.com/mydanyi/armada-installer/releases/download/v0.2.1/armada-installer-0.2.1.zip",
+    "sha256": "c4063faa37ff50bebf7c11ca2ca567f6ddfde3240a2f6758407747d825edabd5",
     "directory": "armada-installer"
   },
   {
