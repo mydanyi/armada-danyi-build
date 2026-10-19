@@ -121,7 +121,7 @@ sudo armada-danyi-update
   保持默认稳定版，与「单翼版」系统更新渠道相互独立。
 - 刷新周期重复调度修复（Gamescope #2417）、改进 FIFO 处理、DRM 实际显示帧身份绑定，
   并保留既有的 HUD 曲线统计方式。
-- 预装个人版 Decky 插件 Armada Installer 0.2.0、LSFG-VK ARM64（r16）与 DeckyClash
+- 预装个人版 Decky 插件 Armada Installer 0.2.1、LSFG-VK ARM64（r16）与 DeckyClash
   1.3.5（含内置可执行代理核心）。插件更新保留用户已更新或修改的副本，仅更新未改动的
   随镜像副本。
 - 内置 Decky 平台在每次手动构建时选取最新预览版，原生 ARM64（当前为 v3.3.0-pre1，
@@ -141,7 +141,7 @@ sudo armada-danyi-update
 
 ## 七、预装插件与每日发行同步
 
-- 随镜像预装三个独立的 Decky 插件：Armada Installer 0.2.0、LSFG-VK ARM64（r16）与
+- 随镜像预装三个独立的 Decky 插件：Armada Installer 0.2.1、LSFG-VK ARM64（r16）与
   DeckyClash 1.3.5（含内置可执行代理核心）。
   三者的版本、下载地址与 SHA256 记录在 `personal-build/plugins.lock.json`；私有
   LSFG 的原始 ZIP 同时保存在 `personal-build/plugin-assets/`，供镜像内置。
