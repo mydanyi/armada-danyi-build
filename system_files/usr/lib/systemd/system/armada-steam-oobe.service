@@ -1,0 +1,14 @@
+[Unit]
+Description=Synchronize the Steam OOBE image marker after registry changes
+# Steam's normal registry writes can burst before completion; the default
+# 5-starts/10-s oneshot limit would otherwise disable this watcher.
+StartLimitIntervalSec=0
+ConditionPathExists=/etc/steamos-oobe-image
+RequiresMountsFor=/var/home/armada
+After=armada-fixups.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/armada/armada-fixups --steam-oobe-only
+StandardOutput=journal
+StandardError=journal

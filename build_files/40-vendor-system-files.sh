@@ -102,6 +102,7 @@ systemctl enable armada-rgb.service
 systemctl enable armada-rgb-brightness-watch.service
 systemctl enable armada-rgb-brightness-watch.path
 systemctl enable armada-fixups.service
+systemctl enable armada-steam-oobe.path
 systemctl enable armada-update-reserve.service
 systemctl enable armada-installer-visibility.service
 systemctl enable armada-steamapps.service

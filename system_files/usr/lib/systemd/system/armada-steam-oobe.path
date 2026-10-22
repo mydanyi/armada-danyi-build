@@ -1,0 +1,13 @@
+[Unit]
+Description=Watch Steam registry files for OOBE completion
+RequiresMountsFor=/var/home/armada
+Before=armada-fixups.service display-manager.service
+
+[Path]
+PathChanged=/var/home/armada/.steam/registry.vdf
+PathChanged=/var/home/armada/.local/share/Steam/registry.vdf
+PathChanged=/var/home/armada/.local/share/Steam/config/loginusers.vdf
+Unit=armada-steam-oobe.service
+
+[Install]
+WantedBy=multi-user.target

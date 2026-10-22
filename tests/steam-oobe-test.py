@@ -184,7 +184,7 @@ class SteamOOBETests(unittest.TestCase):
 
     def test_main_invokes_sync_steam_oobe_with_existing_fixups(self):
         with mock.patch.multiple(self.module, **{name: mock.DEFAULT for name in MAIN_FIXUPS}) as mocks:
-            self.module.main()
+            self.module.main([])
 
             for name in MAIN_FIXUPS:
                 self.assertEqual(

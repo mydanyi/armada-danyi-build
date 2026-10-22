@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import os
 import pathlib
 import re
@@ -180,7 +181,23 @@ def sync_steam_oobe():
         STEAM_OOBE_IMAGE.touch(exist_ok=True)
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="armada-fixups",
+        description="Apply Armada state fixups.",
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--steam-oobe-only",
+        action="store_true",
+        help="only synchronize the Steam OOBE image marker",
+    )
+    args = parser.parse_args(argv)
+
+    if args.steam_oobe_only:
+        sync_steam_oobe()
+        return
+
     fix_desktop_ownership()
     fix_proton_11_tool_id()
     strip_compat_wildcard()

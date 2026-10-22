@@ -45,6 +45,57 @@ fi
 
 touch "${steam_root}/.cef-enable-remote-debugging"
 cd "${steam_arm_dir}"
-exec "${steam_arm}" \
-    "${steam_args[@]}" \
-    "$@"
+
+# Steam exits 42 when it wants to restart itself.  Supervise it inside this
+# Gamescope session so only that request is absorbed; every other status is
+# propagated unchanged and termination is never answered with a relaunch.
+child_pid=
+pending_signal=0
+
+forward_signal() {
+    # $1: numeric signal, $2: name for kill -s
+    pending_signal=$1
+    if [[ -n ${child_pid} ]]; then
+        kill -s "$2" "${child_pid}" 2>/dev/null || true
+    fi
+}
+
+trap 'forward_signal 15 TERM' TERM
+trap 'forward_signal 2 INT' INT
+trap 'forward_signal 1 HUP' HUP
+
+while (( pending_signal == 0 )); do
+    "${steam_arm}" \
+        "${steam_args[@]}" \
+        "$@" &
+    child_pid=$!
+
+    # A signal between fork and assignment still has to reach the child.
+    if (( pending_signal != 0 )); then
+        kill -s TERM "${child_pid}" 2>/dev/null || true
+    fi
+
+    # Re-wait after a forwarded signal until the child is really gone, so it is
+    # always reaped and never relaunched.
+    status=0
+    while :; do
+        status=0
+        wait "${child_pid}" || status=$?
+        if (( pending_signal != 0 )) && kill -0 "${child_pid}" 2>/dev/null; then
+            continue
+        fi
+        break
+    done
+    child_pid=
+
+    if (( pending_signal != 0 )); then
+        exit $(( 128 + pending_signal ))
+    fi
+    if (( status == 42 )); then
+        printf 'Steam requested a restart; relaunching\n' >&2
+        continue
+    fi
+    exit "${status}"
+done
+
+exit $(( 128 + pending_signal ))
