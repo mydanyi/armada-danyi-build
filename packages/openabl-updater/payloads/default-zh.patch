@@ -1,0 +1,33 @@
+diff --git a/Core/Settings.c b/Core/Settings.c
+index fa070ca..27ffbfb 100644
+--- a/Core/Settings.c
++++ b/Core/Settings.c
+@@ -11,6 +11,7 @@
+ 
+ #include "Base/Buffer.h"
+ #include "Base/Text.h"
++#include "Ui/Lang.h"
+ 
+ CONST UINT8 gSettingsTimeoutChoices[4] = {0, 3, 5, 10};
+ 
+@@ -23,6 +24,7 @@ SettingsDefault (OUT SETTINGS *Settings)
+     .BootSource    = BOOT_SOURCE_AUTO,
+     .Rotation      = ROTATION_AUTO,
+     .ModelRotation = ROTATION_NONE,
++    .Language      = LANG_ZH_HANS,
+   };
+ }
+ 
+diff --git a/Menu/Menu.c b/Menu/Menu.c
+index c721f67..e8eb560 100644
+--- a/Menu/Menu.c
++++ b/Menu/Menu.c
+@@ -262,7 +262,7 @@ MenuLoadPrefs (
+   *Language = MenuVarGet (SETTINGS_KEY_LANGUAGE, &Stored) && Stored.Len == 1 &&
+                   Stored.Data[0] < SETTINGS_LANGUAGES
+                 ? Stored.Data[0]
+-                : LANG_EN;
++                : LANG_ZH_HANS;
+   BufferFree (&Stored);
+ }
+ 

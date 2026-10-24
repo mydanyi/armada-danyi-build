@@ -1,10 +1,13 @@
-From ROCKNIX (https://github.com/ROCKNIX/abl), GPL-2.0, (c) ROCKNIX contributors.
+OpenABL (https://github.com/OpenHandheldCollective/OpenABL), GPL-3.0-or-later,
+(c) Open Handheld Collective. These images are the default-Chinese bilingual
+variant of OpenABL 1.1. The complete corresponding source is installed on the
+system at /usr/share/doc/OpenABL: the upstream base archive
+openabl-v1.1-source.tar.xz plus default-zh.patch, the only source change. Both
+files, and the build and provenance notes, are also listed in OpenABL-notices
+next to this README.
 
-Personal build note: this image ships Chinese OpenABL 1.0 for SM8550, SM8650 and
-SM8750 only; SM8250 keeps the official ABL 1.1.8. Match the firmware to the
-actual SoC of your device. OpenABL notices are in OpenABL-notices, and the full
-source is installed at /usr/share/doc/OpenABL and published as source.tar.gz in
-the Release.
+The images use Simplified Chinese when no language has been stored. Choosing
+English in the menu is remembered, and both languages stay selectable.
 
 1. Copy the OpenABL folder from the SD card to the root of Android internal storage.
 
@@ -27,11 +30,11 @@ the Release.
 4. Copy the backup (abl_a.img and abl_b.img, written into your SoC folder) to your
    PC for safekeeping.
 
-5. Run flash_abl.sh the same way to flash the new ABL.
+5. Run flash_abl.sh the same way to flash OpenABL.
 
-6. Reboot holding VOL- to enter the ABL menu.
+6. Reboot holding VOL- to open the OpenABL menu.
 
-7. In the ABL menu (navigate with VOL-/+, select with POWER):
-     - Set your device model
-     - Toggle boot mode to Linux
-     - Choose Start to exit
+7. In the menu (move with VOL-/+, select with POWER):
+     - Set Device model
+     - Set Boot mode to Linux
+     - Choose Start

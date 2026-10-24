@@ -468,6 +468,10 @@ no equivalent submission was found, or a permanent URL to the upstream submissio
 - `patches/0904-power-supply-qcom-battmgr-report-charge-threshold-set-failures.patch`
   source: armada
   upstream: local
+- `patches/0910-firmware-qcom-scm-allow-QSEECOM-on-OpenABL-s-platforms.patch`
+  source: https://github.com/OpenHandheldCollective/OpenABL/blob/8f09253f8f93e7d9ff0b5baf3bda87976f0c54ac/Linux/0001-firmware-qcom-scm-allow-QSEECOM-on-OpenABL-s-platforms.patch
+  upstream: unknown
+  notes: Upstream tested it on SM6115 only. Armada needs it for SM8250, SM8550, SM8650 and SM8750, where OpenABL keeps its settings in UEFI variables.
 - `patches/0001-pcie-update-sm8650-dtsi.patch`
   source: https://github.com/ROCKNIX/distribution/blob/bcf3b5bc574990b96543484575b06f912153a715/projects/ROCKNIX/devices/SM8650/patches/linux/0001-pcie-update-sm8650-dtsi.patch
   upstream: https://lore.kernel.org/r/20260611-wake-v2-35-2744251b1181@oss.qualcomm.com

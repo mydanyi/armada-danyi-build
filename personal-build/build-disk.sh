@@ -3,9 +3,9 @@
 #
 # Turns the rootfs unit's image into a flashable disk image on the long-lived
 # Docker runner (192.168.88.9): the pinned BIB produces output/image/disk.raw,
-# the official post_process scripts stage the ROCKNIX ABL /KERNEL and finalize
-# the image (MBR + ABL + gzip), and an inline offline check verifies the
-# freshly-built image between those two steps before it is compressed.
+# the official post_process scripts stage /KERNEL and the OpenABL flashing kit
+# and finalize the image (MBR + ABL + gzip), and an inline offline check verifies
+# the freshly-built image between those two steps before it is compressed.
 #
 # BIB runs with --build-container pointing at a local ARM64 build environment
 # that replaces btrfs/bwrap with native tools while the ARM64 installer remains
@@ -158,7 +158,7 @@ mkdir -p /work/osbuild-store
 [ -s "${RAW}" ] || { echo "ERROR: BIB produced no raw image at ${RAW}" >&2; exit 1; }
 echo "==> BIB raw image size: $(stat -c '%s' "${RAW}") bytes"
 
-# Stage the ROCKNIX ABL /KERNEL on the ESP (official post-process step). The
+# Stage the /KERNEL boot image on the ESP (official post-process step). The
 # official script takes the raw image path as its argument; invoked via bash so
 # it does not depend on the checkout's executable bit.
 bash /source/post_process/make-bootimg.sh "${RAW}"
@@ -214,20 +214,22 @@ fi
 DEPLOY="${deploy_dirs[0]}"
 
 # Final install-image content check: the deployment must carry exactly the
-# source ABL payloads, the ABL manifest/catalog, and the OpenABL docs (full
-# source archive plus license notices).
+# source OpenABL payloads, the ABL manifest and catalogs (including the
+# personal migration list), and the OpenABL docs (corresponding source archive,
+# patch, build notes, provenance, license).
 for soc in SM8250 SM8550 SM8650 SM8750; do
-    payload="${DEPLOY}/usr/lib/armada/abl/abl_signed-${soc}.elf"
+    payload="${DEPLOY}/usr/lib/openabl-updater/abl_signed-${soc}.elf"
     [ -f "${payload}" ] \
         || { echo "ERROR: installed ABL payload missing: ${payload}" >&2; exit 1; }
-    cmp -s "${payload}" "/source/abl/abl_signed-${soc}.elf" \
+    cmp -s "${payload}" "/source/packages/openabl-updater/payloads/abl_signed-${soc}.elf" \
         || { echo "ERROR: installed ABL payload differs from source: ${payload}" >&2; exit 1; }
 done
-for f in /usr/lib/armada/abl/manifest /usr/lib/armada/abl/releases.tsv; do
+for f in /usr/lib/openabl-updater/manifest /usr/lib/openabl-updater/legacy-releases.tsv \
+    /usr/lib/openabl-updater/personal-migrations.tsv; do
     [ -f "${DEPLOY}${f}" ] \
         || { echo "ERROR: ABL metadata missing from image: ${DEPLOY}${f}" >&2; exit 1; }
 done
-for f in openabl-fed5b5e-source.tar.gz LICENSE LICENSES.md CREDITS.md PROVENANCE.md; do
+for f in openabl-v1.1-source.tar.xz default-zh.patch BUILD.md PROVENANCE.md OpenABL-LICENSE; do
     [ -f "${DEPLOY}/usr/share/doc/OpenABL/${f}" ] \
         || { echo "ERROR: OpenABL doc missing from image: ${DEPLOY}/usr/share/doc/OpenABL/${f}" >&2; exit 1; }
 done
@@ -341,7 +343,7 @@ mkdir -p /work/tmp
 export OUT="/output/armada-${ARMADA_VERSION}.img.gz"
 export GZIP_LEVEL=6
 export TMPDIR=/work/tmp
-bash /source/post_process/finalize-armada-image.sh "${RAW}"
+bash /source/post_process/finalize-armada-image.sh "${RAW}" "${IMAGE_NAME}"
 
 # Verify the compressed artifact and record its hash.
 pigz -t "${OUT}"

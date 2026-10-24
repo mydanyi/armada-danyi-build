@@ -35,6 +35,7 @@
 0106-drm-panel-il97680a-luminance-linear-backlight-scale.patch
 0107-drm-msm-dpu-AVR-variable-refresh-on-DSI-video-mode.patch
 0108-drm-msm-dpu-send-the-flip-event-after-the-vblank-irq.patch
+0109-drm-panel-il97680a-defer-display-enable.patch
 0064_Mangmi-Air-Y-Pro-panel.patch
 
 # ============== Panel power + backlight ==============
@@ -261,3 +262,7 @@ v2_20260420_neil_armstrong_arm64_qcom_sm8650_misc_enhancements.patch
 0080-ASoC-codecs-lpass-tx-macro-track-every-active-decimator.patch
 0564-soundwire-qcom-force-runtime-suspend-across-system-sleep.patch
 0565-pinctrl-qcom-sm8650-lpass-lpi-force-runtime-suspend-across-system-sleep.patch
+
+# ============== Firmware ==============
+# OpenABL: UEFI variables through QSEECOM on its chipsets
+0910-firmware-qcom-scm-allow-QSEECOM-on-OpenABL-s-platforms.patch

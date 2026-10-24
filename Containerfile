@@ -31,6 +31,8 @@ ARG MESA_X86_REF
 ARG EXTEST_REF
 ARG ARMADA_AURORA_REF
 ARG ARMADA_SPLASH_REF
+ARG ARMADA_LOGOS_REF
+ARG OPENABL_UPDATER_REF
 ARG ARMADA_RGB_REF
 ARG UMTP_RESPONDER_REF
 
@@ -86,6 +88,10 @@ FROM ${ARMADA_AURORA_REF} AS armada-aurora
 
 FROM ${ARMADA_SPLASH_REF} AS armada-splash
 
+FROM ${ARMADA_LOGOS_REF} AS armada-logos
+
+FROM ${OPENABL_UPDATER_REF} AS openabl-updater
+
 FROM ${ARMADA_RGB_REF} AS armada-rgb
 
 FROM ${UMTP_RESPONDER_REF} AS umtp-responder
@@ -103,7 +109,6 @@ COPY decky/armada-store/ ./
 RUN npm test && npm run build
 
 FROM scratch AS ctx
-COPY abl /abl/
 COPY build_files /build_files/
 COPY decky /decky/
 COPY personal-build /personal-build/
@@ -139,7 +144,9 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=bind,from=mesa-x86,source=/,target=/packages/mesa-x86 \
     --mount=type=bind,from=extest,source=/,target=/packages/extest \
     --mount=type=bind,from=armada-splash,source=/rpms,target=/packages/armada-splash \
+    --mount=type=bind,from=armada-logos,source=/rpms,target=/packages/armada-logos \
     --mount=type=bind,from=armada-rgb,source=/rpms,target=/packages/armada-rgb \
+    --mount=type=bind,from=openabl-updater,source=/rpms,target=/packages/openabl-updater \
     --mount=type=bind,from=umtp-responder,source=/rpms,target=/packages/umtp-responder \
     --mount=type=bind,from=decky-build,source=/build/armada-control/dist,target=/packages/decky-dist \
     --mount=type=bind,from=decky-build,source=/build/armada-store/dist,target=/packages/decky-store-dist \

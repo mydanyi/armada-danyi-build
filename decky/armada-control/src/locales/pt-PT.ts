@@ -73,8 +73,6 @@ export const ptPT = {
   "settings.desktopMode": "Modo de ambiente de trabalho",
   "settings.usbFileTransfer": "Transferência de ficheiros por USB",
   "settings.enabledUntilShutdown": "Ativado até ao próximo reinício",
-  "settings.automaticAblUpdates": "Atualização automática do ABL",
-  "settings.updatesDuringShutdown": "Atualizar ao reiniciar",
   "settings.desktopModeError": "Não foi possível alterar o modo de ambiente de trabalho",
   "settings.sleepModeError": "Não foi possível alterar o modo de suspensão",
   "calibration.checking": "A verificar o comando...",

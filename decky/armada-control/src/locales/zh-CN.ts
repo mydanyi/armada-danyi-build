@@ -73,8 +73,6 @@ export const zhCN = {
   "settings.desktopMode": "桌面模式",
   "settings.usbFileTransfer": "USB 文件传输",
   "settings.enabledUntilShutdown": "已启用，关机后停用",
-  "settings.automaticAblUpdates": "自动更新 ABL",
-  "settings.updatesDuringShutdown": "关机时更新",
   "settings.desktopModeError": "无法更改桌面模式",
   "settings.sleepModeError": "无法更改休眠模式",
   "calibration.checking": "正在检测控制器……",

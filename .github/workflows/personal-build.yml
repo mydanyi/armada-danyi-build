@@ -184,6 +184,7 @@ jobs:
               bash /src/personal-build/tests/package-hash-failure-test.sh
               bash /src/personal-build/tests/install-7z-test.sh
               bash /src/tests/abl-update-test.sh
+              bash /src/tests/abl-personal-migration-test.sh
               python3 /src/personal-build/tests/personal-channel-test.py
               python3 /src/tests/desktop-update-test.py
               python3 /src/tests/armada-os-test.py

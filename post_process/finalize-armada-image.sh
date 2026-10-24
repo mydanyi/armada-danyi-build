@@ -1,15 +1,13 @@
 #!/bin/bash
-# Post-BIB: stage ROCKNIX ABL files and compress.
+# Post-BIB: stage the OpenABL flashing kit and compress.
 
 set -euxo pipefail
 
 RAW_IMAGE="${1:-output/raw/disk.raw}"
-source "$(dirname "${BASH_SOURCE[0]}")/../abl/release.env"
+ARMADA_IMAGE="${2:?usage: finalize-armada-image.sh <disk.raw> <container image>}"
 OUT="${OUT:-output/armada-$(TZ='America/New_York' date +%Y%m%d).img.gz}"
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-ABL_RELEASES="${REPO_ROOT}/abl/releases.tsv"
-ABL_CATALOG_TOOL="${REPO_ROOT}/system_files/usr/lib/armada/abl-version"
-ABL_SRC="${REPO_ROOT}/abl"
+ABL_KIT="${REPO_ROOT}/packages/openabl-updater/sdcard"
 
 if [[ ! -f "${RAW_IMAGE}" ]]; then
     echo "ERROR: raw image not found at ${RAW_IMAGE}"
@@ -19,6 +17,21 @@ fi
 
 WORK=$(mktemp -d)
 trap "sudo umount '${WORK}/mnt' 2>/dev/null || true; sudo losetup -d \"\$(cat ${WORK}/loop 2>/dev/null)\" 2>/dev/null || true; rm -rf '${WORK}'" EXIT
+
+ABL_SRC="${WORK}/abl"
+DOC_SRC="${WORK}/doc"
+container=$(sudo podman create "${ARMADA_IMAGE}")
+sudo podman cp "${container}:/usr/lib/openabl-updater" "${ABL_SRC}" || {
+    sudo podman rm "${container}" >/dev/null; exit 1;
+}
+sudo podman cp "${container}:/usr/share/doc/OpenABL" "${DOC_SRC}" || {
+    sudo podman rm "${container}" >/dev/null; exit 1;
+}
+sudo podman rm "${container}" >/dev/null
+sudo chown -R "$(id -u):$(id -g)" "${ABL_SRC}" "${DOC_SRC}"
+manifest_get() { sed -n "s/^$1=//p" "${ABL_SRC}/manifest" | head -1; }
+ARMADA_ABL_NAME=$(manifest_get ARMADA_ABL_NAME)
+ARMADA_ABL_VERSION=$(manifest_get ARMADA_ABL_VERSION)
 
 LOOP=$(sudo losetup -fP --show "${RAW_IMAGE}")
 echo "${LOOP}" > "${WORK}/loop"
@@ -37,23 +50,22 @@ sudo mount "${ESP}" "${WORK}/mnt"
 sudo mkdir -p "${WORK}/mnt/OpenABL"
 # One image serves all devices, so stage a self-contained folder per SoC.
 # vfat has no Unix ownership, so `cp -a` would error on chown under set -e.
-sudo cp "${REPO_ROOT}/abl/README" "${WORK}/mnt/OpenABL/README"
+sudo cp "${ABL_KIT}/README" "${WORK}/mnt/OpenABL/README"
+# Notices only: the full source archive stays in /usr/share/doc/OpenABL inside
+# the system image, not on the ESP.
+sudo mkdir -p "${WORK}/mnt/OpenABL/OpenABL-notices"
+for f in OpenABL-LICENSE BUILD.md PROVENANCE.md default-zh.patch; do
+    [ -f "${DOC_SRC}/${f}" ] || {
+        echo "ERROR: OpenABL doc ${f} missing from ${ARMADA_IMAGE}" >&2
+        exit 1
+    }
+    sudo cp "${DOC_SRC}/${f}" "${WORK}/mnt/OpenABL/OpenABL-notices/"
+done
 for soc in SM8250 SM8550 SM8650 SM8750; do
-    version_key="ARMADA_ABL_VERSION_${soc}"
-    soc_version=${!version_key:-${ARMADA_ABL_VERSION}}
-    approved=$(ARMADA_ABL_RELEASES="${ABL_RELEASES}" \
-        python3 "${ABL_CATALOG_TOOL}" --lookup "${soc_version}" "${soc}") || {
-        echo "ERROR: missing approved ${soc_version} ${soc} payload" >&2
-        exit 1
-    }
-    read -r approved_size approved_hash <<<"${approved}"
+    approved_hash=$(manifest_get "ARMADA_ABL_SHA256_${soc}")
     payload="${ABL_SRC}/abl_signed-${soc}.elf"
-    [[ $(stat -c %s "${payload}") == "${approved_size}" ]] || {
-        echo "ERROR: ${soc} payload size does not match the approved release" >&2
-        exit 1
-    }
-    [[ $(sha256sum "${payload}" | cut -d ' ' -f 1) == "${approved_hash}" ]] || {
-        echo "ERROR: ${soc} payload hash does not match the approved release" >&2
+    [[ -n "${approved_hash}" && $(sha256sum "${payload}" | cut -d ' ' -f 1) == "${approved_hash}" ]] || {
+        echo "ERROR: ${soc} payload does not match the ${ARMADA_ABL_NAME} ${ARMADA_ABL_VERSION} manifest" >&2
         exit 1
     }
     d="${WORK}/mnt/OpenABL/${soc}"
@@ -62,21 +74,10 @@ for soc in SM8250 SM8550 SM8650 SM8750; do
     printf '%s  abl_signed-%s.elf\n' "${approved_hash}" "${soc}" \
         | sudo tee "$d/abl_signed-${soc}.elf.sha256" >/dev/null
     for s in flash_abl backup_abl restore_backup_abl; do
-        sed "s/%DEVICE%/${soc}/g" "${REPO_ROOT}/abl/${s}.sh.template" \
+        sed "s/%DEVICE%/${soc}/g" "${ABL_KIT}/${s}.sh.template" \
             | sudo tee "$d/${s}.sh" >/dev/null
     done
     sudo chmod 0755 "$d"/*.sh
-done
-
-# OpenABL license notices on the ESP. The full GPL source archive stays in the
-# system image (/usr/share/doc/OpenABL) and the Release source package, so the
-# ESP only carries the notices.
-notices="${WORK}/mnt/OpenABL/OpenABL-notices"
-sudo mkdir -p "${notices}"
-sudo cp "${REPO_ROOT}/abl/openabl/LICENSE" "${notices}/LICENSE"
-sudo cp -r "${REPO_ROOT}/abl/openabl/LICENSES" "${notices}/LICENSES"
-for f in LICENSES.md CREDITS.md PROVENANCE.md; do
-    sudo cp "${REPO_ROOT}/abl/openabl/${f}" "${notices}/${f}"
 done
 
 # Disable GRUB so ABL falls through to /KERNEL.

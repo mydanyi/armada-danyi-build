@@ -35,8 +35,14 @@ pkgs=(
     # Boot splash for Armada, runs all the way from initramfs into gamescope
     /packages/armada-splash/*.rpm
 
+    # OpenABL payloads and the shutdown ABL updater
+    /packages/openabl-updater/*.rpm
+
     # RGB support package for handhelds
     /packages/armada-rgb/*.rpm
+
+    # Replace Fedora styling with Armada styling
+    /packages/armada-logos/*.rpm
 
     # Patched KWin lets devices pin Plasma's virtual keyboard to a configured output.
     /packages/kwin/kwin-[0-9]*.rpm

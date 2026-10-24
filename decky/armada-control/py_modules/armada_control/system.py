@@ -81,13 +81,6 @@ def mtp_enabled():
     return active_s == "active"
 
 
-def abl_auto_enabled():
-    try:
-        return bool(call("get_abl_auto_enabled").get("enabled"))
-    except Exception:
-        return False
-
-
 def os_version():
     return read_text(OS_VERSION_PATH) or "unknown"
 
@@ -127,10 +120,6 @@ def set_ssh_enabled(enabled):
 
 def set_mtp_enabled(enabled):
     return bool(call("set_mtp_enabled", enabled=bool(enabled)).get("enabled"))
-
-
-def set_abl_auto_enabled(enabled):
-    return bool(call("set_abl_auto_enabled", enabled=bool(enabled)).get("enabled"))
 
 
 def bottom_screen_enabled():

@@ -20,10 +20,8 @@ import armada_perf
 
 SOCKET = Path("/run/armada/control.sock")
 SESSION_SOCKET = Path(armada_perf.SESSION_SOCKET)
-ABL_VERSION_TOOL = "/usr/lib/armada/abl-version"
+ABL_VERSION_TOOL = "/usr/libexec/openabl-updater/abl-version"
 RGB_TOOL = "/usr/bin/armada-rgb"
-ABL_CONFIG = Path("/etc/armada/abl.conf")
-ABL_MANIFEST = Path("/usr/lib/armada/abl/manifest")
 ABL_PARTITIONS = (
     ("A", "/dev/disk/by-partlabel/abl_a"),
     ("B", "/dev/disk/by-partlabel/abl_b"),
@@ -186,23 +184,6 @@ def set_desktop_mode(mode: str):
 def select_mem_sleep(mode):
     if mode == "s2idle":
         MEM_SLEEP_PATH.write_text(f"{mode}\n", encoding="utf-8")
-
-
-def abl_auto_enabled():
-    for path, key in ((ABL_CONFIG, "auto_update_enabled"), (ABL_MANIFEST, "ARMADA_ABL_AUTO")):
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            continue
-        value = ""
-        for line in lines:
-            name, sep, raw = line.partition("=")
-            if sep and name.strip() == key:
-                value = raw.strip()
-                break
-        if value in {"0", "1"}:
-            return value == "1"
-    return False
 
 
 def device_env():
@@ -371,12 +352,22 @@ def abl_version():
         )
         version = result.stdout.strip() if result.returncode == 0 else ""
         versions.append((name, version))
+    if not versions[0][1] and not versions[1][1]:
+        # Not in the catalog: an OpenABL build still says so through its variables.
+        result = subprocess.run(
+            ["/usr/bin/python3", ABL_VERSION_TOOL, "--firmware"],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        running = result.stdout.strip() if result.returncode == 0 else ""
+        if running:
+            return running if " " in running else f"{running} (custom build)"
     if versions[0][1] == versions[1][1]:
-        return f"ROCKNIX {versions[0][1]}" if versions[0][1] else "Unknown"
-    return ", ".join(
-        f"{name}: ROCKNIX {version}" if version else f"{name}: Unknown"
-        for name, version in versions
-    )
+        return versions[0][1] or "Unknown"
+    return ", ".join(f"{name}: {version or 'Unknown'}" for name, version in versions)
 
 
 def action_set_controller_type(request):
@@ -509,15 +500,6 @@ def action_suspend_swipe_gestures(request):
     if action_get_swipe_gestures_enabled({})["enabled"]:
         gamescope_swipe_gestures(not suspended)
     return {"suspended": suspended}
-
-
-def action_set_abl_auto_enabled(request):
-    atomic_write(ABL_CONFIG, f"auto_update_enabled={int(bool(request.get('enabled')))}\n")
-    return {"enabled": abl_auto_enabled()}
-
-
-def action_get_abl_auto_enabled(request):
-    return {"enabled": abl_auto_enabled()}
 
 
 def action_get_device_env(request):
@@ -891,7 +873,6 @@ ACTIONS = {
     "get_abl_version": action_get_abl_version,
     "get_rgb": action_get_rgb,
     "set_rgb": action_set_rgb,
-    "get_abl_auto_enabled": action_get_abl_auto_enabled,
     "get_ssh_enabled": action_get_ssh_enabled,
     "get_mtp_enabled": action_get_mtp_enabled,
     "inputplumber_intercept": action_inputplumber_intercept,
@@ -899,7 +880,6 @@ ACTIONS = {
     "set_mtp_enabled": action_set_mtp_enabled,
     "set_bottom_screen_enabled": action_set_bottom_screen_enabled,
     "set_bottom_screen_brightness": action_set_bottom_screen_brightness,
-    "set_abl_auto_enabled": action_set_abl_auto_enabled,
     "get_desktop_mode": action_get_desktop_mode,
     "set_desktop_mode": action_set_desktop_mode,
     "set_sleep_mode": action_set_sleep_mode,

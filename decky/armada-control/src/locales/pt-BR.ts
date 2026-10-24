@@ -73,8 +73,6 @@ export const ptBR = {
   "settings.desktopMode": "Modo da área de trabalho",
   "settings.usbFileTransfer": "Transferência de arquivos por USB",
   "settings.enabledUntilShutdown": "Habilitado até o próximo reinício",
-  "settings.automaticAblUpdates": "Atualização Automática do ABL",
-  "settings.updatesDuringShutdown": "Atualiza ao reiniciar",
   "settings.desktopModeError": "Não foi possível alterar o modo da área de trabalho",
   "settings.sleepModeError": "Não foi possível alterar o modo de descanso",
   "calibration.checking": "Verificando o controle...",

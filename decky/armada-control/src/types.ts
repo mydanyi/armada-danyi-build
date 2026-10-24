@@ -146,7 +146,6 @@ export interface Config {
   protonDefaults: string[];
   osVersion: string;
   ablVersion: string;
-  ablAutoEnabled: boolean;
   bottomScreenSupported: boolean;
   bottomScreenEnabled: boolean;
   bottomScreenBrightnessSupported: boolean;

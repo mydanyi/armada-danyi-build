@@ -71,8 +71,6 @@ export const en = {
   "settings.desktopMode": "Desktop Mode",
   "settings.usbFileTransfer": "USB File Transfer",
   "settings.enabledUntilShutdown": "Enabled until shutdown",
-  "settings.automaticAblUpdates": "Automatic ABL Updates",
-  "settings.updatesDuringShutdown": "Updates during shutdown",
   "settings.desktopModeError": "Could not change desktop mode",
   "settings.sleepModeError": "Could not change sleep mode",
   "calibration.checking": "Checking controller...",

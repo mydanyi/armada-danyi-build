@@ -3,7 +3,6 @@ from .power import factory_power_defaults, parse_power
 from .rgb import rgb_supported
 from .steam import installed_games
 from .system import (
-    abl_auto_enabled,
     abl_version,
     bottom_screen_brightness,
     bottom_screen_active,
@@ -50,7 +49,6 @@ def build_config(include_games=True):
         ],
         "osVersion": os_version(),
         "ablVersion": abl_version(),
-        "ablAutoEnabled": abl_auto_enabled(),
         "bottomScreenSupported": bool(
             env.get("ARMADA_SECONDARY_CONNECTOR") and env.get("ARMADA_SECONDARY_TOUCHSCREEN")
         ),
