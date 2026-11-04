@@ -1,6 +1,7 @@
 import { definePlugin } from "@decky/api";
 import { getCompatApplied, getConfig, getInstalledGames, saveCompatApplied, suspendSwipeGestures } from "./backend";
 import { Content } from "./Content";
+import { registerSteamProfileLocalization } from "./lib/steamProfileLocalization";
 import {
   configureCompatPolicy,
   defaultWindowsCompatTool,
@@ -36,6 +37,7 @@ function watchSideMenus(): () => void {
 export default definePlugin(() => {
   let unregisterDownloadWatcher = () => {};
   const stopWatchingSideMenus = watchSideMenus();
+  const unregisterSteamProfileLocalization = registerSteamProfileLocalization();
   const persistHandledGames = () => {
     saveCompatApplied(handledGameAppids()).catch(() => {});
   };
@@ -96,6 +98,7 @@ export default definePlugin(() => {
       cancelled = true;
       unregisterDownloadWatcher();
       stopWatchingSideMenus();
+      unregisterSteamProfileLocalization();
     },
     icon: (
       <svg
